@@ -1,0 +1,37 @@
+# Data Agent 项目配置
+# 创建时间: {{created_at}}
+
+project:
+  id: {{project_id}}
+  name: "{{project_name}}"
+  created_at: {{created_at}}
+
+# 需求约束（初始化时从需求文件解析）
+requirements:
+  word_count:
+    target: {{word_count_target}}
+    min: {{word_count_min}}
+    max: {{word_count_max}}
+  format:
+    type: {{format_type}}
+    citation_style: {{citation_style}}
+  tools:
+    required: {{tools_required}}
+  deadline: {{deadline}}
+
+# AI检测结果记录
+ai_checks:
+  # 示例:
+  # - date: "2026-05-09T14:00"
+  #   file: "essay_draft.md"
+  #   score: 45
+  #   issues: ["sentence_length", "vocabulary"]
+  # - date: "2026-05-09T15:00"
+  #   file: "essay_humanized.md"
+  #   score: 18
+  #   issues: []
+
+# 交付记录
+delivery:
+  final_file: ""
+  delivered_at: ""

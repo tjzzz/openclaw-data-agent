@@ -1,0 +1,20 @@
+# Ignore everything at root
+/*
+!.gitignore
+
+# But allow the skills directory itself
+!/skills
+
+# Ignore all subdirs inside skills
+/skills/*
+
+# Whitelist only the 3 tracked skills
+!/skills/data-agent
+!/skills/ai-text-humanizer-api
+!/skills/turnitin-ai-checker
+
+# Common junk files to exclude everywhere
+.DS_Store
+__pycache__/
+*.pyc
+.clawhub/
