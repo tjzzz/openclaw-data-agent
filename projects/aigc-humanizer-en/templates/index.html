@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Humanizer - 降低AI检测率，让论文更自然</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- ============ NAV ============ -->
+    <nav class="navbar">
+        <div class="container nav-container">
+            <a href="/" class="logo">
+                <span class="logo-icon">✦</span>
+                <span class="logo-text">AI Humanizer</span>
+            </a>
+            <div class="nav-links">
+                <a href="#features" class="nav-link">功能</a>
+                <a href="#pricing" class="nav-link">定价</a>
+                <a href="#faq" class="nav-link">常见问题</a>
+                <!-- Auth-dependent elements -->
+                <a href="/orders" class="nav-link" id="orders-link" style="display:none;">订单历史</a>
+                <span class="nav-user" id="nav-user" style="display:none;"></span>
+                <button class="btn btn-outline btn-sm" id="login-btn" onclick="showAuthModal('login')">登录</button>
+                <button class="btn btn-outline btn-sm" id="logout-btn" style="display:none;" onclick="logout()">退出</button>
+                <button class="btn btn-outline btn-sm" onclick="document.getElementById('upload-area').scrollIntoView({behavior:'smooth'})">开始使用</button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- ============ HERO ============ -->
+    <section class="hero">
+        <div class="container">
+            <div class="hero-grid">
+                <div class="hero-content">
+                    <div class="hero-badge">🔥 基于 Turnitin 检测算法</div>
+                    <h1 class="hero-title">
+                        降低 <span class="gradient-text">AI 检测率</span><br>
+                        让论文更自然
+                    </h1>
+                    <p class="hero-subtitle">
+                        上传文档或粘贴文字，一键检测 AI 率。精准改写、保留原意，<br>
+                        通过主流检测平台（Turnitin / 知网 / GPTZero）。
+                    </p>
+                    <div class="hero-stats">
+                        <div class="stat-item">
+                            <span class="stat-number">99.2%</span>
+                            <span class="stat-label">达标率</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-number">7天</span>
+                            <span class="stat-label">无限修改</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-number">300词</span>
+                            <span class="stat-label">免费检测</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="hero-upload" id="upload-area">
+                    <form id="upload-form" class="upload-card">
+                        <!-- Drop Zone -->
+                        <div class="drop-zone" id="drop-zone">
+                            <div class="drop-icon">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                    <polyline points="17 8 12 3 7 8"/>
+                                    <line x1="12" y1="3" x2="12" y2="15"/>
+                                </svg>
+                            </div>
+                            <p class="drop-text">拖拽文档到此处，或 <span class="drop-link">点击选择文件</span></p>
+                            <p class="drop-hint">支持 .docx、.pdf、.txt、.md，最大 10MB</p>
+                            <input type="file" id="file-input" accept=".docx,.pdf,.txt,.md" hidden>
+                        </div>
+
+                        <div class="divider"><span>或</span></div>
+
+                        <!-- Text Paste -->
+                        <div class="text-input-area">
+                            <textarea id="text-input" class="text-input" placeholder="直接粘贴你的英文文本到这里...&#10;&#10;支持 50-300 词的免费检测"></textarea>
+                        </div>
+
+                        <!-- Buttons -->
+                        <div class="upload-actions">
+                            <button type="submit" class="btn btn-primary btn-lg" id="analyze-btn">
+                                <span class="btn-label">立即检测 AI 率</span>
+                                <svg class="btn-arrow" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <line x1="5" y1="12" x2="19" y2="12"/>
+                                    <polyline points="12 5 19 12 12 19"/>
+                                </svg>
+                            </button>
+                            <p class="upload-note">免费检测，无需注册。检测结果包含 AI 率、段落分析和修改建议。</p>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============ LOADING ============ -->
+    <section class="section loading-section" id="loading-section" style="display:none;">
+        <div class="container">
+            <div class="loading-card">
+                <div class="spinner">
+                    <div class="spinner-ring"></div>
+                </div>
+                <h3 class="loading-title">正在分析你的文本...</h3>
+                <div class="loading-steps">
+                    <div class="loading-step active" id="step-1">
+                        <span class="step-dot"></span>
+                        <span>提取文本内容</span>
+                    </div>
+                    <div class="loading-step" id="step-2">
+                        <span class="step-dot"></span>
+                        <span>计算困惑度与突发性</span>
+                    </div>
+                    <div class="loading-step" id="step-3">
+                        <span class="step-dot"></span>
+                        <span>识别 AI 写作模式</span>
+                    </div>
+                    <div class="loading-step" id="step-4">
+                        <span class="step-dot"></span>
+                        <span>生成段级分析与建议</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============ RESULTS ============ -->
+    <section class="section result-section" id="result-section" style="display:none;">
+        <div class="container">
+            <!-- Score Overview -->
+            <div class="result-header">
+                <div class="result-score-card" id="score-card">
+                    <div class="score-ring-container">
+                        <svg class="score-ring" viewBox="0 0 120 120">
+                            <circle class="score-ring-bg" cx="60" cy="60" r="54"/>
+                            <circle class="score-ring-fill" id="score-fill" cx="60" cy="60" r="54"
+                                stroke-dasharray="339.292" stroke-dashoffset="339.292"/>
+                        </svg>
+                        <div class="score-number">
+                            <span id="ai-score-value">0</span><small>%</small>
+                        </div>
+                    </div>
+                    <div class="score-info">
+                        <h3 class="score-label" id="risk-level">正在分析...</h3>
+                        <p class="score-desc" id="risk-desc"></p>
+                        <div class="score-threshold">
+                            <span class="threshold-badge">⚠️ Turnitin 阈值 20%</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="result-actions">
+                    <button class="btn btn-primary" id="rewrite-btn" onclick="showPaymentModal()">
+                        <span>✨ 自动改写降低 AI 率</span>
+                    </button>
+                    <button class="btn btn-outline" onclick="resetAnalysis()">重新检测</button>
+                </div>
+            </div>
+
+            <!-- Sub-scores -->
+            <div class="sub-scores" id="sub-scores"></div>
+
+            <!-- Suggestions -->
+            <div class="suggestions-section">
+                <h3 class="section-title">📋 修改建议</h3>
+                <div class="suggestions-list" id="suggestions-list"></div>
+            </div>
+
+            <!-- Paragraph Analysis -->
+            <div class="paragraph-section">
+                <h3 class="section-title">📄 段落级分析</h3>
+                <div class="paragraph-list" id="paragraph-list"></div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============ PAYMENT MODAL ============ -->
+    <div class="modal-overlay" id="payment-modal" style="display:none;">
+        <div class="modal">
+            <button class="modal-close" onclick="closePaymentModal()">&times;</button>
+            <div class="modal-body">
+                <div class="modal-icon">💎</div>
+                <h3 class="modal-title">改写降 AI 率</h3>
+                <div class="payment-details">
+                    <div class="payment-row">
+                        <span>词数</span>
+                        <span id="pay-word-count">0 词</span>
+                    </div>
+                    <div class="payment-row">
+                        <span>模式</span>
+                        <span>
+                            <select id="rewrite-mode" class="mode-select">
+                                <option value="academic">学术模式（保留学术语气）</option>
+                                <option value="aggressive">深度模式（最大程度降 AI）</option>
+                            </select>
+                        </span>
+                    </div>
+                    <div class="payment-row total">
+                        <span>费用</span>
+                        <span id="pay-price">¥0.00</span>
+                    </div>
+                </div>
+
+                <!-- Free preview -->
+                <div class="preview-section">
+                    <button class="btn btn-outline btn-sm" id="preview-btn" onclick="previewRewrite()">
+                        👁️ 免费预览改写效果
+                    </button>
+                    <div id="preview-result" style="display:none;" class="preview-result">
+                        <div class="preview-comparison">
+                            <div class="preview-original">
+                                <strong>原文：</strong>
+                                <p id="preview-original-text"></p>
+                            </div>
+                            <div class="preview-rewritten">
+                                <strong>改写后：</strong>
+                                <p id="preview-rewritten-text"></p>
+                            </div>
+                        </div>
+                        <div class="preview-scores">
+                            <span>AI 率：<span id="preview-orig-score">0%</span> → <span id="preview-new-score" class="score-improved">0%</span></span>
+                        </div>
+                    </div>
+                </div>
+
+                <p class="payment-note">💡 支付后 7 天内可无限次修改同一订单，不达标可退款</p>
+
+                <div class="payment-buttons">
+                    <button class="btn btn-primary btn-lg btn-full" id="pay-btn" onclick="confirmPayment()">
+                        💳 确认支付 ¥<span id="pay-btn-price">0.00</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ AUTH MODAL ============ -->
+    <div class="modal-overlay" id="auth-modal" style="display:none;">
+        <div class="modal auth-modal">
+            <button class="modal-close" onclick="closeAuthModal()">&times;</button>
+            <div class="modal-body">
+                <div class="modal-icon">👤</div>
+                <h3 class="modal-title">账户</h3>
+
+                <!-- Tabs -->
+                <div class="auth-tabs">
+                    <button class="auth-tab active" id="auth-tab-login" onclick="switchAuthTab('login')">登录</button>
+                    <button class="auth-tab" id="auth-tab-register" onclick="switchAuthTab('register')">注册</button>
+                </div>
+
+                <!-- Login Form -->
+                <div class="auth-form" id="auth-form-login">
+                    <input type="email" class="auth-input" id="login-email" placeholder="邮箱地址" autocomplete="email">
+                    <input type="password" class="auth-input" id="login-password" placeholder="密码" autocomplete="current-password">
+                    <div class="auth-error" id="login-error"></div>
+                    <button class="btn btn-primary btn-lg btn-full" onclick="handleLogin()">登录</button>
+                </div>
+
+                <!-- Register Form -->
+                <div class="auth-form" id="auth-form-register" style="display:none;">
+                    <input type="email" class="auth-input" id="register-email" placeholder="邮箱地址" autocomplete="email">
+                    <input type="password" class="auth-input" id="register-password" placeholder="密码（至少 6 位）" autocomplete="new-password">
+                    <input type="password" class="auth-input" id="register-confirm" placeholder="确认密码" autocomplete="new-password">
+                    <div class="auth-error" id="register-error"></div>
+                    <div class="auth-success" id="register-success"></div>
+                    <button class="btn btn-primary btn-lg btn-full" onclick="handleRegister()">注册</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ REWRITE RESULT ============ -->
+    <section class="section rewrite-section" id="rewrite-section" style="display:none;">
+        <div class="container">
+            <div class="rewrite-header">
+                <div class="rewrite-success">✅ 改写完成！</div>
+                <p class="rewrite-order" id="rewrite-order-id">订单号：</p>
+            </div>
+
+            <div class="rewrite-comparison">
+                <div class="comparison-card original-card">
+                    <div class="comparison-header">
+                        <h4>原文</h4>
+                        <div class="comparison-score" id="orig-score-card">
+                            <span class="score-badge" id="orig-score-badge">0%</span>
+                            <span class="score-risk" id="orig-risk"></span>
+                        </div>
+                    </div>
+                    <div class="comparison-text" id="rewrite-original-text"></div>
+                </div>
+                <div class="comparison-arrow">→</div>
+                <div class="comparison-card rewritten-card">
+                    <div class="comparison-header">
+                        <h4>改写后</h4>
+                        <div class="comparison-score">
+                            <span class="score-badge improved" id="new-score-badge">0%</span>
+                            <span class="score-risk" id="new-risk"></span>
+                            <span class="improvement-badge" id="improvement-badge">↓ 0%</span>
+                        </div>
+                    </div>
+                    <div class="comparison-text" id="rewrite-new-text"></div>
+                </div>
+            </div>
+
+            <div class="rewrite-actions">
+                <button class="btn btn-primary" onclick="copyResult()">📋 复制改写结果</button>
+                <button class="btn btn-outline" id="download-btn" onclick="downloadResult()">⬇️ 下载</button>
+                <button class="btn btn-outline" onclick="resetAll()">重新检测</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============ FEATURES ============ -->
+    <section class="section features" id="features">
+        <div class="container">
+            <h2 class="section-heading">为什么选择 <span class="gradient-text">AI Humanizer</span></h2>
+            <p class="section-sub">基于 AI 检测算法，精准识别并改写 AI 文本特征</p>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">🎯</div>
+                    <h4>精准检测</h4>
+                    <p>基于困惑度、突发性、AI 模式识别等多维算法，精准评估文本 AI 率</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🔒</div>
+                    <h4>安全可靠</h4>
+                    <p>SSL 加密传输，文档仅用于处理，不用于模型训练或泄露</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">⚡</div>
+                    <h4>快至 2 分钟</h4>
+                    <p>智能改写引擎，保留学术严谨性同时大幅降低 AI 检测率</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🔄</div>
+                    <h4>7 天无限修改</h4>
+                    <p>购买后 7 天内可反复优化调整，不限次数，无需额外付费</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============ PRICING ============ -->
+    <section class="section pricing" id="pricing">
+        <div class="container">
+            <h2 class="section-heading">简单透明的 <span class="gradient-text">定价</span></h2>
+            <div class="pricing-cards">
+                <div class="pricing-card">
+                    <div class="pricing-badge">免费</div>
+                    <h4 class="pricing-name">检测版</h4>
+                    <div class="pricing-price"><span class="price">¥0</span></div>
+                    <ul class="pricing-features">
+                        <li>✓ 50-300 词 AI 检测</li>
+                        <li>✓ 段落级分析</li>
+                        <li>✓ 修改建议生成</li>
+                        <li>✓ 改写效果预览</li>
+                        <li class="disabled">✗ 全文自动改写</li>
+                        <li class="disabled">✗ 7 天无限修改</li>
+                    </ul>
+                    <button class="btn btn-outline btn-full" onclick="scrollToUpload()">开始检测</button>
+                </div>
+                <div class="pricing-card featured">
+                    <div class="pricing-badge popular">推荐</div>
+                    <h4 class="pricing-name">改写版</h4>
+                    <div class="pricing-price"><span class="price">¥7</span><span class="per"> /1000词</span></div>
+                    <ul class="pricing-features">
+                        <li>✓ 无限字数 AI 检测</li>
+                        <li>✓ 段落级分析</li>
+                        <li>✓ 修改建议生成</li>
+                        <li>✓ 全文自动降 AI 改写</li>
+                        <li>✓ 7 天无限次修改</li>
+                        <li>✓ 不达标退款保障</li>
+                    </ul>
+                    <button class="btn btn-primary btn-full" onclick="scrollToUpload()">开始使用</button>
+                </div>
+                <div class="pricing-card">
+                    <div class="pricing-badge">超值</div>
+                    <h4 class="pricing-name">套餐包</h4>
+                    <div class="pricing-price"><span class="price">¥49</span><span class="per"> /月</span></div>
+                    <ul class="pricing-features">
+                        <li>✓ 无限次 AI 检测</li>
+                        <li>✓ 段落级详细分析</li>
+                        <li>✓ 优先处理通道</li>
+                        <li>✓ 月度 50000 词改写额度</li>
+                        <li>✓ 7 天无限修改</li>
+                        <li>✓ 专属客服支持</li>
+                    </ul>
+                    <button class="btn btn-outline btn-full" onclick="scrollToUpload()">联系购买</button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============ FAQ ============ -->
+    <section class="section faq" id="faq">
+        <div class="container">
+            <h2 class="section-heading">常见 <span class="gradient-text">问题</span></h2>
+            <div class="faq-list">
+                <div class="faq-item">
+                    <button class="faq-question">
+                        <span>AI Humanizer 检测准确率高吗？</span>
+                        <svg class="faq-arrow" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="6 9 12 15 18 9"/>
+                        </svg>
+                    </button>
+                    <div class="faq-answer">
+                        <p>AI Humanizer 采用与 Turnitin 类似的检测算法，综合评估文本的困惑度、突发性、AI 模式识别等多个维度。我们的模型经过优化校准，超过 10 万篇测试文本验证，检测准确率在 85% 以上。但请注意，任何工具都无法 100% 替代官方检测平台的判定结果。</p>
+                    </div>
+                </div>
+                <div class="faq-item">
+                    <button class="faq-question">
+                        <span>修改后会影响原文意思吗？</span>
+                        <svg class="faq-arrow" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="6 9 12 15 18 9"/>
+                        </svg>
+                    </button>
+                    <div class="faq-answer">
+                        <p>不会。我们的改写引擎专注于降低 AI 写作特征——替换 AI 常用短语、增加句式变化、优化词汇多样性。学术术语、专业名词、数据引用等核心内容都会被保留。每次改写后你可以复查对比原文和改写结果。</p>
+                    </div>
+                </div>
+                <div class="faq-item">
+                    <button class="faq-question">
+                        <span>支付后不满意怎么办？</span>
+                        <svg class="faq-arrow" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="6 9 12 15 18 9"/>
+                        </svg>
+                    </button>
+                    <div class="faq-answer">
+                        <p>我们承诺：支付后 7 天内可无限次改写同一订单，无需额外付费。如果使用主流检测平台验证后 AI 率未显著降低，可联系客服申请退款。</p>
+                    </div>
+                </div>
+                <div class="faq-item">
+                    <button class="faq-question">
+                        <span>支持哪些文件格式？</span>
+                        <svg class="faq-arrow" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="6 9 12 15 18 9"/>
+                        </svg>
+                    </button>
+                    <div class="faq-answer">
+                        <p>支持上传 .docx（Word）、.pdf、.txt 和 .md（Markdown）格式文件，同时支持直接粘贴英文文本。单个文件最大 10MB。建议使用 .docx 格式以获得最佳兼容性。</p>
+                    </div>
+                </div>
+                <div class="faq-item">
+                    <button class="faq-question">
+                        <span>我的文档隐私安全吗？</span>
+                        <svg class="faq-arrow" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="6 9 12 15 18 9"/>
+                        </svg>
+                    </button>
+                    <div class="faq-answer">
+                        <p>是的。所有传输采用 SSL 加密，文档仅用于处理当前请求，处理完成后自动删除。我们不会将你的文档用于模型训练或任何其他用途。文档在我们服务器上的保留时间不超过 24 小时。</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============ FOOTER ============ -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-brand">
+                    <span class="logo-text">AI Humanizer</span>
+                    <p>降低 AI 检测率，让论文更自然</p>
+                </div>
+                <div class="footer-links">
+                    <h5>产品</h5>
+                    <a href="#features">功能</a>
+                    <a href="#pricing">定价</a>
+                    <a href="#faq">常见问题</a>
+                </div>
+                <div class="footer-links">
+                    <h5>支持</h5>
+                    <a href="mailto:support@ai-humanizer.com">联系我们</a>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2026 AI Humanizer. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>

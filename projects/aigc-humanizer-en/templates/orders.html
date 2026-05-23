@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>订单历史 - AI Humanizer</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        /* Orders page specific overrides */
+        .orders-page .navbar {
+            position: relative;
+        }
+        .orders-page .hero {
+            display: none;
+        }
+    </style>
+</head>
+<body class="orders-page">
+
+    <!-- ============ NAV ============ -->
+    <nav class="navbar">
+        <div class="container nav-container">
+            <a href="/" class="logo">
+                <span class="logo-icon">✦</span>
+                <span class="logo-text">AI Humanizer</span>
+            </a>
+            <div class="nav-links">
+                <a href="/#features" class="nav-link">功能</a>
+                <a href="/#pricing" class="nav-link">定价</a>
+                <a href="/#faq" class="nav-link">常见问题</a>
+                <a href="/orders" class="nav-link" id="orders-link">订单历史</a>
+                <span class="nav-user" id="nav-user"></span>
+                <button class="btn btn-outline btn-sm" id="login-btn" onclick="showAuthModal('login')">登录</button>
+                <button class="btn btn-outline btn-sm" id="logout-btn" style="display:none;" onclick="logout()">退出</button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- ============ ORDERS CONTENT ============ -->
+    <section class="section">
+        <div class="container">
+            {% if needs_login %}
+            <div class="orders-empty" style="padding:100px 24px;">
+                <div class="orders-empty-icon">🔒</div>
+                <div class="orders-empty-text">请登录后查看订单历史</div>
+                <button class="btn btn-primary btn-lg" onclick="showAuthModal('login')">去登录</button>
+            </div>
+            {% else %}
+            <div class="orders-header">
+                <h1 class="orders-title">📋 我的订单</h1>
+            </div>
+
+            <!-- Orders List -->
+            <div class="orders-list" id="orders-list">
+                <!-- Rendered by JavaScript -->
+            </div>
+
+            <!-- Empty State -->
+            <div class="orders-empty" id="orders-empty" style="display:none;">
+                <div class="orders-empty-icon">📄</div>
+                <div class="orders-empty-text">暂无订单，去检测文本</div>
+                <a href="/" class="btn btn-primary btn-lg">去检测</a>
+            </div>
+
+            <!-- Pagination -->
+            <div class="orders-pagination" id="orders-pagination" style="display:none;">
+                <button class="pagination-btn" id="page-prev" onclick="goToPage(currentOrderPage - 1)">← 上一页</button>
+                <span class="pagination-info" id="page-info">第 1 / 1 页</span>
+                <button class="pagination-btn" id="page-next" onclick="goToPage(currentOrderPage + 1)">下一页 →</button>
+            </div>
+            {% endif %}
+        </div>
+    </section>
+
+    <!-- ============ AUTH MODAL ============ -->
+    <div class="modal-overlay" id="auth-modal" style="display:none;">
+        <div class="modal auth-modal">
+            <button class="modal-close" onclick="closeAuthModal()">&times;</button>
+            <div class="modal-body">
+                <div class="modal-icon">👤</div>
+                <h3 class="modal-title">账户</h3>
+                <div class="auth-tabs">
+                    <button class="auth-tab active" id="auth-tab-login" onclick="switchAuthTab('login')">登录</button>
+                    <button class="auth-tab" id="auth-tab-register" onclick="switchAuthTab('register')">注册</button>
+                </div>
+                <div class="auth-form" id="auth-form-login">
+                    <input type="email" class="auth-input" id="login-email" placeholder="邮箱地址" autocomplete="email">
+                    <input type="password" class="auth-input" id="login-password" placeholder="密码" autocomplete="current-password">
+                    <div class="auth-error" id="login-error"></div>
+                    <button class="btn btn-primary btn-lg btn-full" onclick="handleLogin()">登录</button>
+                </div>
+                <div class="auth-form" id="auth-form-register" style="display:none;">
+                    <input type="email" class="auth-input" id="register-email" placeholder="邮箱地址" autocomplete="email">
+                    <input type="password" class="auth-input" id="register-password" placeholder="密码（至少 6 位）" autocomplete="new-password">
+                    <input type="password" class="auth-input" id="register-confirm" placeholder="确认密码" autocomplete="new-password">
+                    <div class="auth-error" id="register-error"></div>
+                    <button class="btn btn-primary btn-lg btn-full" onclick="handleRegister()">注册</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+    {% if not needs_login %}
+    <script>
+        // Load orders when page loads (reuse script.js functions)
+        document.addEventListener('DOMContentLoaded', function() {
+            loadOrders(1);
+        });
+    </script>
+    {% endif %}
+</body>
+</html>
