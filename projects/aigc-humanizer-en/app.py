@@ -11,51 +11,134 @@ import json
 import io
 from functools import wraps
 from datetime import datetime, timedelta
-from flask import Flask, render_template, request, jsonify, session, send_file
+from flask import Flask, render_template, request, jsonify, session, send_file, g
+from flask.sessions import SessionInterface, SessionMixin
+from uuid import uuid4
+import pickle as _pickle
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from ai_checker import analyze_text, analyze_by_paragraphs
 from humanize import humanize_text
 from models import init_db, get_connection, User, Order
-from payment_adapter import MockPaymentAdapter
+from payment_adapter import create_payment_adapter
 from humanizer_adapter import RuleBasedHumanizer
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'change-this-in-production-and-use-env-var')
+if not os.environ.get('SECRET_KEY'):
+    raise RuntimeError("SECRET_KEY environment variable must be set. Generate one with: python -c 'import secrets; print(secrets.token_hex(32))'")
+app.secret_key = os.environ['SECRET_KEY']
 app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # 10MB
 app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(__file__), 'uploads')
-app.config['PAYMENT_ADAPTER'] = 'mock'
+app.config['PAYMENT_ADAPTER'] = os.environ.get('PAYMENT_ADAPTER', 'mock')
 app.config['HUMANIZER_ADAPTER'] = 'rule_based'
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=2)
+
+# Server-side filesystem session (avoids Flask's 4KB cookie limit)
+_session_dir = os.path.join(os.path.dirname(__file__), 'instance', 'flask_session')
+os.makedirs(_session_dir, exist_ok=True)
+
+
+class _FileSystemSession(dict, SessionMixin):
+    """Minimal server-side session stored on the filesystem."""
+    def __init__(self, data=None, sid=None, new=False):
+        super().__init__(data or {})
+        self.sid = sid or uuid4().hex
+        self.new = new
+        self.modified = True
+
+
+class _FileSystemSessionInterface(SessionInterface):
+    """Filesystem-based session interface using pickle serialization."""
+    def __init__(self, session_dir):
+        self.session_dir = session_dir
+        os.makedirs(session_dir, exist_ok=True)
+
+    def open_session(self, app, request):
+        _cookie_name = app.config.get('SESSION_COOKIE_NAME', 'session')
+        try:
+            sid = request.cookies.get(_cookie_name)
+        except Exception:
+            sid = None
+        if sid:
+            path = os.path.join(self.session_dir, sid)
+            if os.path.exists(path):
+                try:
+                    with open(path, 'rb') as f:
+                        data = _pickle.load(f)
+                    return _FileSystemSession(data=data, sid=sid)
+                except Exception:
+                    pass
+        return _FileSystemSession(new=True)
+
+    def save_session(self, app, session, response):
+        _cookie_name = app.config.get('SESSION_COOKIE_NAME', 'session')
+        if not session or not hasattr(session, 'sid'):
+            if session and hasattr(session, 'sid'):
+                path = os.path.join(self.session_dir, session.sid)
+                if os.path.exists(path):
+                    os.remove(path)
+            response.delete_cookie(_cookie_name)
+            return
+
+        path = os.path.join(self.session_dir, session.sid)
+        with open(path, 'wb') as f:
+            _pickle.dump(dict(session), f)
+
+        response.set_cookie(
+            _cookie_name, session.sid,
+            max_age=self.get_expiration_time(app, session),
+            httponly=self.get_cookie_httponly(app),
+            domain=self.get_cookie_domain(app),
+            path=self.get_cookie_path(app),
+            secure=self.get_cookie_secure(app),
+            samesite=self.get_cookie_samesite(app),
+        )
+
+
+app.session_interface = _FileSystemSessionInterface(_session_dir)
 
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 # Initialize database and adapters
 init_db()
-payment_adapter = MockPaymentAdapter()
+payment_adapter = create_payment_adapter()  # Config-driven adapter selection
 humanizer_adapter = RuleBasedHumanizer()
+
+# Safety check: refuse to start in production with mock payment adapter
+if app.config.get('PAYMENT_ADAPTER') == 'mock' and os.environ.get('FLASK_ENV') == 'production':
+    raise RuntimeError(
+        "Refusing to start: PAYMENT_ADAPTER=mock is not allowed in production. "
+        "Set PAYMENT_ADAPTER=alipay and configure Alipay credentials."
+    )
+
+if app.config.get('PAYMENT_ADAPTER') == 'mock':
+    import logging
+    logging.warning("PAYMENT_ADAPTER=mock is enabled. This should only be used for development.")
 
 
 # ========== Database Connection Helpers ==========
 
 def get_db():
-    """Get a database connection from the current request context or create one."""
-    if 'db_conn' not in app.config:
-        conn = get_connection()
-        app.config['db_conn'] = conn
-    return app.config['db_conn']
+    """Get a database connection scoped to the current request context."""
+    if 'db_conn' not in g:
+        g.db_conn = get_connection()
+    return g.db_conn
 
 
 @app.teardown_appcontext
 def close_db(exception=None):
     """Close the database connection at the end of each request."""
-    conn = app.config.pop('db_conn', None)
+    conn = g.pop('db_conn', None)
     if conn is not None:
         conn.close()
 
 
 # ========== Constants ==========
-PRICE_PER_1000_WORDS = 9.9  # ¥9.9 / 1000 words
-FREE_WORD_LIMIT = 300  # Words requiring payment for rewrite
-MAX_FREE_ANALYSIS_WORDS = 600  # Max words for free analysis
+PRICE_PER_1000_WORDS = 14.9  # ¥14.9 / 1000 words
+FREE_WORD_LIMIT = 500  # Words requiring payment for rewrite
+MAX_FREE_ANALYSIS_WORDS = 500  # Max words for free analysis
 
 # ========== Text Extraction ==========
 
@@ -517,8 +600,7 @@ def api_rewrite():
         'mode': mode,
         'word_count': word_count,
         'price': round(price, 2),
-        'order_id': order_id,
-        'original_analysis': analyze_text(text)
+        'order_id': order_id
     }
 
     return jsonify({
@@ -558,8 +640,8 @@ def api_confirm_payment():
         # Run humanization via adapter
         humanized = humanizer_adapter.humanize(text, mode=mode)
 
-        # Reuse cached analysis from pending instead of re-analyzing
-        original_analysis = pending['original_analysis']
+        # Analyze original text
+        original_analysis = analyze_text(text)
         rewritten_analysis = analyze_text(humanized)
 
         # Generate diff-like comparison
@@ -673,6 +755,250 @@ def api_preview_rewrite():
 
     except Exception as e:
         return jsonify({"error": f"预览出错：{str(e)}"}), 500
+
+
+# ========== Payment API Routes ==========
+
+@app.route('/api/create-payment', methods=['POST'])
+@login_required
+def api_create_payment():
+    """
+    Create a payment order and return QR code for scanning.
+    This replaces the old /api/rewrite + /api/confirm-payment flow.
+    """
+    data = request.get_json(silent=True) or {}
+    text = data.get('text', session.get('last_text', ''))
+    mode = data.get('mode', 'academic')
+
+    if not text:
+        return jsonify({"error": "没有可改写的文本，请先分析"}), 400
+
+    word_count = len(text.split())
+    price = max(PRICE_PER_1000_WORDS * (word_count / 1000), PRICE_PER_1000_WORDS)
+    price = round(price, 2)
+
+    # Generate order ID
+    order_id = f"ORD-{uuid.uuid4().hex[:8].upper()}"
+
+    # Get format info from session
+    original_format = session.get('last_original_format', 'txt')
+    original_filename = session.get('last_original_filename', None)
+    user_id = session.get('user_id')
+
+    # Create pending payment record in DB
+    conn = get_db()
+    try:
+        Order.create_payment_record(
+            conn, user_id, order_id, text, original_format, original_filename,
+            word_count, price, mode
+        )
+    except Exception as e:
+        return jsonify({"error": f"创建订单失败：{str(e)}"}), 500
+
+    # Call payment adapter to create prepay order
+    result = payment_adapter.create_prepay_order(
+        order_id, price, f"AI降AI率服务 - {word_count}词"
+    )
+
+    if result.get('error'):
+        return jsonify({"error": result['error']}), 500
+
+    # Save QR code to DB for reference
+    qr_code = result.get('qr_code')
+    if qr_code:
+        Order.save_qr_code(conn, order_id, qr_code)
+
+    return jsonify({
+        "success": True,
+        "order": {
+            "order_id": order_id,
+            "word_count": word_count,
+            "price": price,
+            "qr_code": qr_code,
+            "mode": mode,
+            "expires_in": result.get('expires_in', 1800)
+        }
+    })
+
+
+@app.route('/api/payment-status/<order_id>')
+def api_payment_status(order_id):
+    """
+    Check payment status for an order.
+    Used by frontend polling after QR code is displayed.
+    """
+    user_id = session.get('user_id')
+    conn = get_db()
+
+    order = Order.get_by_order_id(conn, order_id)
+    if not order:
+        return jsonify({"error": "订单不存在"}), 404
+
+    # Check ownership (if logged in)
+    if user_id and order['user_id'] != user_id:
+        return jsonify({"error": "无权访问该订单"}), 403
+
+    payment_status = order.get('payment_status', 'pending')
+    status = order.get('status', 'pending')
+
+    # If still pending, optionally query payment gateway directly
+    if payment_status == 'pending':
+        try:
+            query_result = payment_adapter.query_payment(order_id)
+            if query_result.get('status') == 'paid':
+                # Payment detected! Mark as paid and trigger rewrite.
+                _process_payment_success(conn, order_id, query_result.get('trade_no'))
+                payment_status = 'paid'
+                status = 'processing'
+        except Exception:
+            pass  # Query failed, just return current status
+
+    # Build response based on status
+    response = {
+        "order_id": order_id,
+        "payment_status": payment_status,
+        "status": status,
+        "price": order.get('price'),
+        "word_count": order.get('word_count')
+    }
+
+    # If completed, include the rewrite result
+    if status == 'completed' and order.get('rewritten_text'):
+        original_analysis = analyze_text(order['original_text']) if order.get('original_text') else {}
+        response.update({
+            "success": True,
+            "original": {
+                "text": order['original_text'],
+                "ai_score": round(order.get('original_score', 0), 1),
+                "risk_level": original_analysis.get('risk_level', 'unknown')
+            },
+            "rewritten": {
+                "text": order['rewritten_text'],
+                "ai_score": round(order.get('rewritten_score', 0), 1),
+                "risk_level": analyze_text(order['rewritten_text']).get('risk_level', 'unknown') if order['rewritten_text'] else 'unknown'
+            },
+            "improvement": round((order.get('original_score', 0) or 0) - (order.get('rewritten_score', 0) or 0), 1),
+            "original_format": order.get('original_format', 'txt'),
+            "original_filename": order.get('original_filename')
+        })
+
+    return jsonify(response)
+
+
+@app.route('/api/webhook/alipay', methods=['POST'])
+def api_webhook_alipay():
+    """
+    Alipay async notification webhook.
+    This is called by Alipay servers after payment is completed.
+    """
+    # Get parameters (Alipay sends as form data)
+    params = request.form.to_dict()
+
+    sign = params.pop('sign', None)
+    sign_type = params.pop('sign_type', None)
+
+    # Verify notification
+    is_valid, order_id, trade_no, amount = payment_adapter.verify_notification(params, sign)
+
+    if not is_valid:
+        return "fail", 200
+
+    conn = get_db()
+
+    # Check order exists and is pending
+    order = Order.get_by_order_id(conn, order_id)
+    if not order:
+        return "fail", 200
+
+    if order.get('payment_status') != 'pending':
+        # Already processed (duplicate notification)
+        return "success", 200
+
+    # Verify amount matches
+    if amount and abs(amount - (order.get('price') or 0)) > 0.01:
+        # Amount mismatch - potential fraud
+        return "fail", 200
+
+    # Process payment success
+    try:
+        _process_payment_success(conn, order_id, trade_no)
+    except Exception as e:
+        return "fail", 200
+
+    return "success", 200
+
+
+def _process_payment_success(conn, order_id, trade_no):
+    """
+    Internal function to handle successful payment.
+    Marks order as paid and triggers rewrite in background.
+    """
+    import threading
+
+    order = Order.get_by_order_id(conn, order_id)
+    if not order:
+        raise ValueError(f"Order {order_id} not found")
+
+    # Mark as paid
+    Order.mark_paid(conn, order_id, trade_no, datetime.utcnow().isoformat())
+
+    # Read mode from DB — cannot access Flask session in background thread
+    mode = order.get('mode', 'academic')
+
+    # Trigger rewrite in background thread (don't block the webhook response)
+    def do_rewrite():
+        try:
+            text = order['original_text']
+            humanized = humanizer_adapter.humanize(text, mode=mode)
+            rewritten_analysis = analyze_text(humanized)
+            original_analysis = analyze_text(text)
+
+            # Update order with result
+            conn2 = get_connection()
+            try:
+                Order.update_result(
+                    conn2, order_id, humanized,
+                    rewritten_analysis.get('ai_score', 0),
+                    original_analysis.get('ai_score', 0)
+                )
+            finally:
+                conn2.close()
+        except Exception as e:
+            import logging
+            logging.exception(f"Background rewrite failed for {order_id}")
+
+    # Start background thread
+    thread = threading.Thread(target=do_rewrite)
+    thread.daemon = True
+    thread.start()
+
+
+# ========== Test/Debug API (only available in mock mode) ==========
+
+@app.route('/api/test/mock-payment/<order_id>', methods=['POST'])
+def api_test_mock_payment(order_id):
+    """
+    Simulate a successful payment for testing purposes.
+    Only available when PAYMENT_ADAPTER=mock.
+    """
+    if app.config.get('PAYMENT_ADAPTER') != 'mock':
+        return jsonify({"error": "仅在 mock 模式下可用"}), 403
+
+    conn = get_db()
+    order = Order.get_by_order_id(conn, order_id)
+    if not order:
+        return jsonify({"error": "订单不存在"}), 404
+
+    if order.get('payment_status') != 'pending':
+        return jsonify({"error": f"订单状态不是 pending，当前: {order.get('payment_status')}"}), 400
+
+    # Simulate payment success
+    trade_no = f"MOCK_TRADE_{order_id}"
+    try:
+        _process_payment_success(conn, order_id, trade_no)
+        return jsonify({"success": True, "message": "支付模拟成功，正在后台改写...", "order_id": order_id})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ========== Download API ==========
@@ -823,4 +1149,4 @@ if __name__ == '__main__':
     print("=" * 50)
     print("AI Humanizer - Starting on http://127.0.0.1:5100")
     print("=" * 50)
-    app.run(host='127.0.0.1', port=5100, debug=True)
+    app.run(host='127.0.0.1', port=5100)
