@@ -182,10 +182,56 @@ function updateRewriteButton(wordCount, price) {
     }, { signal });
 }
 
+/* 读取当前选中的改写模式（下拉，默认 median） */
+let _currentMode = 'median';
+function getSelectedMode() {
+    return _currentMode;
+}
+
+/* 初始化改写模式下拉（内嵌在"一键改写"按钮内） */
+function initModeDropdown() {
+    const toggle = document.getElementById('mode-toggle');
+    const dropdown = document.getElementById('mode-dropdown');
+    if (!toggle || !dropdown) return;
+
+    // 点击箭头：只展开/收起下拉，不触发表单提交（改写）
+    toggle.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const isOpen = dropdown.classList.toggle('open');
+        toggle.classList.toggle('open', isOpen);
+    });
+
+    // 点击下拉选项：选中模式，不触发表单提交
+    dropdown.querySelectorAll('.mode-dd-option').forEach((opt) => {
+        opt.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            _currentMode = opt.dataset.mode;
+            dropdown.querySelectorAll('.mode-dd-option').forEach(o => o.classList.remove('active'));
+            opt.classList.add('active');
+            dropdown.classList.remove('open');
+            toggle.classList.remove('open');
+        });
+    });
+
+    // 点击下拉内部空白处不关闭
+    dropdown.addEventListener('click', (e) => e.stopPropagation());
+
+    // 点击外部关闭
+    document.addEventListener('click', () => {
+        dropdown.classList.remove('open');
+        toggle.classList.remove('open');
+    });
+}
+
+initModeDropdown();
+
 /* 一键改写：余额够→直接改写对比，不够→跳支付宝充值 */
 async function triggerRewrite(wordCount, price) {
     let paymentBalance = 0;
     let paymentShortfall = wordCount;
+    const mode = getSelectedMode();
     const statusEl = document.getElementById('rewrite-status');
     if (statusEl) statusEl.textContent = '⏳ 正在改写...';
     showLoading();
@@ -194,7 +240,7 @@ async function triggerRewrite(wordCount, price) {
         const resp = await _csrfFetch('/api/rewrite', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text, mode: 'low' })
+            body: JSON.stringify({ text, mode })
         });
         const data = await resp.json();
 
@@ -248,7 +294,7 @@ async function triggerRewrite(wordCount, price) {
         paymentShortfall
     );
     setTimeout(() => {
-        createPaymentOrder(wordCount, null, 'low', paymentShortfall);
+        createPaymentOrder(wordCount, null, mode, paymentShortfall);
     }, 300);
 }
 
@@ -467,7 +513,7 @@ function reDownload(orderId, format) {
 }
 
 async function reHumanize(orderId) {
-    const mode = 'low'; // Default mode
+    const mode = getSelectedMode(); // 跟随当前改写模式（默认 median）
     try {
         showToast('⏳ 正在重新改写...', 'info');
         const resp = await _csrfFetch(`/api/orders/${orderId}/rehumanize`, {

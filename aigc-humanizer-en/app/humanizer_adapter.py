@@ -18,6 +18,12 @@ from app.helpers.segmenter import segment as segment_paragraphs
 logger = logging.getLogger(__name__)
 
 
+def _cfg(name, default):
+    """从 config 安全读取配置项（本地 config.py 可能缺新配置时用默认值）。"""
+    import config as _config
+    return getattr(_config, name, default)
+
+
 def _heading_level_from_style(style):
     """从样式名解析标题级别：Heading 1->1, Title->0, toc->None；非标题返回 None。"""
     if not style:
@@ -89,7 +95,13 @@ class HumanizerAdapter(ABC):
             - protected/table 段：保留原始段落结构（标题级别从原始 style 解析）
             - rewrite 段：改写块可能含多段，按 \\n\\n 拆分，均为正文（heading_level=None）
         """
-        tasks = segment_paragraphs(paragraphs, mode=mode)
+        tasks = segment_paragraphs(
+            paragraphs,
+            mode=mode,
+            median_paras=_cfg('REWRITE_MEDIAN_PARAS', 3),
+            high_paras=_cfg('REWRITE_HIGH_PARAS', 5),
+            max_words=_cfg('REWRITE_MAX_WORDS', 2000),
+        )
 
         parts = []
         structured = []
@@ -100,11 +112,19 @@ class HumanizerAdapter(ABC):
                 f"{len(tasks) - len(rewrite_tasks)} protected/table elements"
             )
 
-        for task in tasks:
+        # 频控：改写请求数超过阈值时，每次请求后 sleep，防止超 60 次/分钟
+        rate_limit_max = _cfg('RATE_LIMIT_MAX_REQUESTS', 30)
+        rate_limit_sleep = _cfg('RATE_LIMIT_SLEEP', 1.0)
+        rate_limit_enabled = len(rewrite_tasks) > rate_limit_max
+
+        for i, task in enumerate(tasks):
             if task["type"] == "rewrite":
                 block_text = task["text"]
                 rewritten = block_rewriter(block_text)
                 parts.append(rewritten)
+                # 频控：改写请求间 sleep（除最后一次外）
+                if rate_limit_enabled and i < len(tasks) - 1:
+                    time.sleep(rate_limit_sleep)
                 # 改写块内所有段落均为正文，heading_level=None
                 for chunk in rewritten.split('\n\n'):
                     if chunk.strip():
@@ -140,18 +160,21 @@ class HumanizerAdapter(ABC):
 class RuleBasedHumanizer(HumanizerAdapter):
     """Rule-based humanizer wrapping the existing humanize.py module."""
 
-    def humanize(self, text, mode='low', paragraphs=None):
+    def humanize(self, text, mode=None, paragraphs=None):
         """Humanize text using deterministic rule-based transformations."""
         return self.humanize_structured(text, mode=mode, paragraphs=paragraphs)[0]
 
-    def humanize_structured(self, text, mode='low', paragraphs=None):
+    def humanize_structured(self, text, mode=None, paragraphs=None):
         """
         Humanize text using deterministic rule-based transformations.
 
         返回 (text_str, structured_paragraphs)。有段落结构时按 mode 分段，
         保护标题/表格/参考文献/短段，仅对正文块做规则改写。
         无段落结构时对整篇改写（structured 为空列表）。
+        mode 缺省时取 config.REWRITE_MODE_DEFAULT（默认 median）。
         """
+        if mode is None:
+            mode = _cfg('REWRITE_MODE_DEFAULT', 'median')
         from app.humanize import humanize_text
 
         if paragraphs is not None:
@@ -197,7 +220,7 @@ class ApiHumanizer(HumanizerAdapter):
                 "ApiHumanizer will raise an error if used."
             )
 
-    def humanize(self, text, mode='low', paragraphs=None):
+    def humanize(self, text, mode=None, paragraphs=None):
         """
         Humanize text via ai-text-humanizer.com API.
 
@@ -208,12 +231,12 @@ class ApiHumanizer(HumanizerAdapter):
 
         ``mode`` controls the segmentation granularity:
             - low    : send each body paragraph individually (compat: paragraph)
-            - median : send all body paragraphs under a Heading 2 as a block
-            - high   : send all body paragraphs under a Heading 1 as a block
-            - (fallback): if no matching heading exists, dynamic paragraph blocks
+            - median : aggregate consecutive body paragraphs (default max 3)
+            - high   : aggregate consecutive body paragraphs (default max 5)
+            - (aggregation limit configurable; =1 equals low)
 
         Without ``paragraphs``, falls back to processing the whole text
-        (original behavior).
+        (original behavior). mode 缺省时取 config.REWRITE_MODE_DEFAULT。
 
         Args:
             text: The text to humanize.
@@ -228,14 +251,16 @@ class ApiHumanizer(HumanizerAdapter):
         """
         return self.humanize_structured(text, mode=mode, paragraphs=paragraphs)[0]
 
-    def humanize_structured(self, text, mode='low', paragraphs=None):
+    def humanize_structured(self, text, mode=None, paragraphs=None):
         """
         Humanize text via ai-text-humanizer.com API, returning structured output.
 
         返回 (text_str, structured_paragraphs)。有段落结构时按 mode 分段改写，
         保护标题/表格/短段，并记录每个输出段落的标题级别供下载 Word 重建格式。
-        无段落结构时对整篇改写（structured 为空列表）。
+        无段落结构时对整篇改写（structured 为空列表）。mode 缺省取默认。
         """
+        if mode is None:
+            mode = _cfg('REWRITE_MODE_DEFAULT', 'median')
         if not self.email or not self.password:
             raise RuntimeError(
                 "ai-text-humanizer.com credentials not configured. "

@@ -13,13 +13,13 @@
     4. 返回有序的重建任务列表，含每个块需要送 API 的文本与应保护的段落。
 """
 
-import math
 import re
 
 
-# 默认：无标题退化时的块数目标
-DEFAULT_MEDIAN_BLOCKS = 7   # median 退化目标块数（正文越多每块段越多）
-DEFAULT_HIGH_BLOCKS = 3     # high 退化目标块数
+# 聚合配置：相邻正文段聚合为一次改写请求的段落数与字数上限
+DEFAULT_MEDIAN_PARAS = 3      # median：最多聚合 3 个连续正文段
+DEFAULT_HIGH_PARAS = 5        # high：最多聚合 5 个连续正文段
+DEFAULT_MAX_WORDS = 2000      # 单次请求最大字数（聚合超过即切新 part）
 
 
 def _looks_like_title(text, words):
@@ -88,73 +88,28 @@ def should_protect(para, min_words=10):
     return guard.should_protect(para)
 
 
-# ---------- 标题栈归属 ----------
-
-class _Section:
-    """一个文档章节（以标题为边界）。"""
-
-    def __init__(self, title_para=None, level=0):
-        self.title = title_para   # 标题段落 dict 或 None（文档开头无标题区）
-        self.level = level        # 标题级别，0 表示根/无标题
-        self.body = []            # 归属的正文段列表
-
-
-def _parse_heading_level(para):
-    """从样式名解析标题级别。Heading 1->1, Heading 2->2 ... 非标题返回 None。"""
-    if not para.get("is_heading"):
-        return None
-    style = (para.get("style") or "").lower()
-    m = re.search(r'heading\s*(\d+)', style)
-    if m:
-        return int(m.group(1))
-    if "title" in style:
-        return 0
-    # toc 目录类，级别用 0（不作为内容分块边界）
-    return None
-
-
-def build_section_tree(paragraphs):
-    """把有序段落列表按标题层级组织成章节树。
-
-    Returns:
-        list[_Section]: 有序的章节列表，每个章节含 title 与 body 段。
-        文档开头的非标题段归入一个无标题的根章节。
-    """
-    sections = []
-    current = _Section(level=0)
-
-    for para in paragraphs:
-        level = _parse_heading_level(para)
-        if level is not None and para.get("is_heading"):
-            # 新标题：把当前章节收尾，开启新章节
-            if current.body or current.title is not None:
-                sections.append(current)
-            current = _Section(title_para=para, level=level)
-        else:
-            current.body.append(para)
-
-    if current.body or current.title is not None:
-        sections.append(current)
-    return sections
-
-
 # ---------- mode 分块 ----------
 
-def _heading_level(mode):
-    """返回 mode 对应的标题级别边界。"""
-    if mode == "median":
-        return 2
-    if mode == "high":
-        return 1
-    return None  # low 或无法识别
-
-
 def segment(paragraphs, mode="low", min_words=10,
-            median_blocks=DEFAULT_MEDIAN_BLOCKS, high_blocks=DEFAULT_HIGH_BLOCKS):
+            median_paras=DEFAULT_MEDIAN_PARAS, high_paras=DEFAULT_HIGH_PARAS,
+            max_words=DEFAULT_MAX_WORDS):
     """按 mode 把有序段落切分为"改写任务"。
 
-    mode 枚举：low=单段 / median=按二级标题 / high=按一级标题。
-    兼容旧值 paragraph（等价于 low）。
+    mode 枚举：
+        low   = 单段（逐段改写，兼容旧值 paragraph）
+        median= 连续正文段聚合（默认最多 3 段 / 总字数<max_words）
+        high  = 连续正文段聚合（默认最多 5 段 / 总字数<max_words）
+
+    聚合规则（median/high 共用，仅可聚合段落数不同）：
+        - 标题 / 表格 / 参考文献 / 短段 是硬边界，不聚合进 part，原样保留
+        - 相邻的正文段聚合成一个 part，最多 max_paras 段 且 总字数 < max_words
+        - 达到任一上限即开启新的 part
+        - 当 max_paras == 1 时，等价于 low（每段独立一次请求）
+
+    Args:
+        median_paras: median 模式最多聚合的连续正文段数（可配置）。
+        high_paras:   high 模式最多聚合的连续正文段数（可配置）。
+        max_words:    单次请求最大字数（聚合超过即切新 part）。
 
     Returns:
         list[dict]: 每个元素：
@@ -175,10 +130,11 @@ def segment(paragraphs, mode="low", min_words=10,
     if mode == "low":
         return _segment_paragraph(paragraphs, guard)
 
-    # 2) median/high：按标题分块
-    level_boundary = _heading_level(mode)
-    return _segment_by_heading(paragraphs, mode, level_boundary, guard,
-                               median_blocks, high_blocks)
+    # 2) median/high：先逐段打标记，再在连续正文之间按 N 段聚合
+    max_paras = high_paras if mode == "high" else median_paras
+    if max_paras <= 1:
+        return _segment_paragraph(paragraphs, guard)
+    return _segment_aggregate(paragraphs, guard, max_paras, max_words)
 
 
 def _segment_paragraph(paragraphs, guard):
@@ -195,133 +151,44 @@ def _segment_paragraph(paragraphs, guard):
     return tasks
 
 
-def _segment_by_heading(paragraphs, mode, level_boundary, guard,
-                        median_blocks, high_blocks):
-    # 先构建章节树，按标题级别聚合
-    sections = build_section_tree(paragraphs)
-
-    # 判断是否存在可用边界标题
-    usable = [s for s in sections if s.title and s.level == level_boundary]
-    if usable:
-        return _merge_sections(sections, level_boundary, guard)
-
-    # 无对应级别标题 → 退化：按段落块分组
-    return _segment_fallback(paragraphs, mode, guard, median_blocks, high_blocks)
+def _count_words(para):
+    return para.get("word_count", len((para.get("text") or "").split()))
 
 
-def _merge_sections(sections, level_boundary, guard):
-    """按给定标题级别把章节合并为"一个边界标题下"的组。
+def _segment_aggregate(paragraphs, guard, max_paras, max_words):
+    """连续正文段按 max_paras 段 + max_words 字聚合为一个 rewrite part。
 
-    组 = 一个边界标题（H1 for high / H2 for median）及其下的全部内容。
-    组内：
-        - 低级别标题（如 high 组里的 H2）：原样保留，作为组内 protected 元素
-        - 正文段：合并送 API（保护段/短段除外）
-        - 表格：强制切分（表格是强边界，前后语义不连续）
+    硬边界（表格/标题/参考文献/短段）作为分割点，不聚合进 part。
     """
     tasks = []
-    group = None   # 当前组：{'rewrite_buffer'}
+    buffer = []      # 当前聚合的正文段
+    buffer_words = 0
 
-    def flush_group():
-        nonlocal group
-        if group is None:
-            return
-        if group["rewrite_buffer"]:
-            body_text = "\n\n".join(p["text"] for p in group["rewrite_buffer"])
+    def flush():
+        nonlocal buffer, buffer_words
+        if buffer:
+            body_text = "\n\n".join(p["text"] for p in buffer)
             tasks.append({"type": "rewrite", "text": body_text,
-                          "paragraphs": group["rewrite_buffer"]})
-        group = None
+                          "paragraphs": buffer})
+            buffer = []
+            buffer_words = 0
 
-    def start_group():
-        return {"rewrite_buffer": []}
-
-    for section in sections:
-        if section.title is not None:
-            lvl = _parse_heading_level(section.title) or 0
-            # 标题先经过 guard，维护引用模式状态（标题本身始终保护）
-            guard.should_protect(section.title)
-            if lvl == level_boundary:
-                # 边界标题：结束当前块，标题原样保留，新开组
-                flush_group()
-                tasks.append({"type": "protected", "text": section.title["text"],
-                              "paragraphs": [section.title]})
-                group = start_group()
-            elif lvl < level_boundary:
-                # 比边界更高级的标题：结束当前块，标题原样保留
-                flush_group()
-                tasks.append({"type": "protected", "text": section.title["text"],
-                              "paragraphs": [section.title]})
-            else:
-                # 比边界更低级的标题（high 组内的 H2/H3）：
-                # 结束当前正文块（保证标题在原位置），标题原样保留
-                flush_group()
-                tasks.append({"type": "protected", "text": section.title["text"],
-                              "paragraphs": [section.title]})
-                group = start_group()
-        # 章节正文
-        for para in section.body:
-            if group is None:
-                group = start_group()
-            if "table" in para:
-                # 表格是强边界：先输出当前块，再输出表格占位
-                flush_group()
-                tasks.append({"type": "table", "paragraphs": [para]})
-                group = start_group()
-            elif guard.should_protect(para):
-                flush_group()
-                tasks.append({"type": "protected", "text": para["text"],
-                              "paragraphs": [para]})
-                group = start_group()
-            else:
-                group["rewrite_buffer"].append(para)
-
-    flush_group()
-    return tasks
-
-
-def _segment_fallback(paragraphs, mode, guard, median_blocks, high_blocks):
-    """无标题时的退化：把所有正文段按动态 M 段一组切块。"""
-    # 第一遍：按顺序推进 guard 状态，记录每段的保护标记
-    protect_flags = []
     for para in paragraphs:
         if "table" in para:
-            protect_flags.append(True)
-        else:
-            protect_flags.append(guard.should_protect(para))
-
-    body_paras = [p for p, f in zip(paragraphs, protect_flags)
-                  if "table" not in p and not f]
-    n = len(body_paras)
-    if n == 0:
-        # 全被保护，直接逐段输出保护
-        return [_make_protected_or_table(p) for p in paragraphs]
-
-    # 动态 M：目标块数
-    target_blocks = median_blocks if mode == "median" else high_blocks
-    m = max(1, math.ceil(n / target_blocks))
-
-    tasks = []
-    bi = 0
-    for i, para in enumerate(paragraphs):
-        if "table" in para:
+            flush()
             tasks.append({"type": "table", "paragraphs": [para]})
-        elif protect_flags[i]:
+        elif guard.should_protect(para):
+            # 标题 / 参考文献 / 短段 是硬边界
+            flush()
             tasks.append({"type": "protected", "text": para["text"],
                           "paragraphs": [para]})
         else:
-            # 该正文段属于当前改写块
-            if bi == 0 or len(tasks) == 0 or tasks[-1].get("type") != "rewrite" or \
-               len(tasks[-1]["paragraphs"]) >= m:
-                tasks.append({"type": "rewrite", "text": para["text"],
-                              "paragraphs": [para]})
-            else:
-                tasks[-1]["text"] += "\n\n" + para["text"]
-                tasks[-1]["paragraphs"].append(para)
-            bi += 1
+            w = _count_words(para)
+            # 若已满 max_paras 段，或加上本段会超过 max_words，则开启新 part
+            if buffer and (len(buffer) >= max_paras or buffer_words + w > max_words):
+                flush()
+            buffer.append(para)
+            buffer_words += w
 
+    flush()
     return tasks
-
-
-def _make_protected_or_table(para):
-    if "table" in para:
-        return {"type": "table", "paragraphs": [para]}
-    return {"type": "protected", "text": para["text"], "paragraphs": [para]}

@@ -193,7 +193,7 @@ async function handleLogin() {
                 const aiScore = parseInt(sessionStorage.getItem('lastAiScore') || '0');
                 showPaymentModalWithAiScore(wc, pr, aiScore);
                 showQRLoading();
-                createPaymentOrder(wc, pr, pendingInfo.mode || 'low');
+                createPaymentOrder(wc, pr, pendingInfo.mode || 'median');
             }, 500);
         }
 
@@ -276,7 +276,7 @@ async function handleRegister() {
                 const aiScore = parseInt(sessionStorage.getItem('lastAiScore') || '0');
                 showPaymentModalWithAiScore(wc, pr, aiScore);
                 showQRLoading();
-                createPaymentOrder(wc, pr, pendingInfo.mode || 'low');
+                createPaymentOrder(wc, pr, pendingInfo.mode || 'median');
             }, 500);
         }
 

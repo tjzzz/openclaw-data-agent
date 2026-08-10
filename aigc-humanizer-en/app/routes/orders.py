@@ -85,10 +85,10 @@ def api_rehumanize(order_id):
         return jsonify({"error": "未登录"}), 401
 
     data = request.get_json(silent=True) or {}
-    # mode 语义为"改写粒度"：low/median/high，默认 low
-    mode = data.get('mode', 'low')
+    # mode 语义为"改写粒度"：low/median/high，默认 median（聚合段数可配）
+    mode = data.get('mode')
     if mode not in ('low', 'median', 'high'):
-        mode = 'low'
+        mode = 'median'
 
     conn = get_db()
     order = Order.get_by_order_id(conn, order_id)

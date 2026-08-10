@@ -28,11 +28,10 @@ def api_rewrite():
 
     data = request.get_json(silent=True) or {}
     text = data.get('text') or session.get('last_text', '')
-    # mode 语义为"改写粒度"：low/median/high
-    # 兼容旧值 academic/paragraph → 默认 low
-    mode = data.get('mode', 'low')
+    # mode 语义为"改写粒度"：low/median/high（默认 median，聚合段数可配）
+    mode = data.get('mode')
     if mode not in ('low', 'median', 'high'):
-        mode = 'low'
+        mode = 'median'
 
     if not text:
         return jsonify({"error": "没有可改写的文本，请先分析"}), 400

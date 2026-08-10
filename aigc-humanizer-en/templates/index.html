@@ -116,15 +116,19 @@
                             <textarea id="text-input" class="text-input" placeholder="直接粘贴文本到这里"></textarea>
                         </div>
 
-                        <!-- Buttons -->
+                        <!-- Rewrite action: main button with built-in mode dropdown -->
                         <div class="upload-actions">
-                            <button type="submit" class="btn btn-primary btn-lg" id="analyze-btn" aria-label="一键改写">
-                                <span class="btn-label">🚀 一键改写</span>
-                                <svg class="btn-arrow" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <line x1="5" y1="12" x2="19" y2="12"/>
-                                    <polyline points="12 5 19 12 12 19"/>
-                                </svg>
-                            </button>
+                            <div class="rewrite-action-wrap">
+                                <button type="submit" class="btn btn-primary btn-lg btn-split" id="analyze-btn" aria-label="一键改写">
+                                    <span class="btn-label">🚀 一键改写</span>
+                                    <span class="btn-split-arrow" id="mode-toggle" role="button" aria-label="选择改写模式" title="改写模式">⌄</span>
+                                </button>
+                                <div class="mode-dropdown" id="mode-dropdown">
+                                    <button type="button" class="mode-dd-option" data-mode="low">精细模式（逐段改写）</button>
+                                    <button type="button" class="mode-dd-option active" data-mode="median">标准模式（多段聚合）</button>
+                                    <button type="button" class="mode-dd-option" data-mode="high">快速模式（大段聚合）</button>
+                                </div>
+                            </div>
                             <p class="upload-note">粘贴文本或上传文档，自动检测 AI 率并改写降 AIGC，保留原意与格式。</p>
                             <p class="rewrite-status" id="rewrite-status"></p>
                         </div>

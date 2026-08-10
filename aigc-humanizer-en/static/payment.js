@@ -128,7 +128,7 @@ function renderPaymentQR(order, wordCount, price) {
     qrSection.style.display = 'block';
 
     // ★ P1: 将 mode 存入 data 属性，供 refreshQRCode 读取
-    qrSection.dataset.payMode = order.mode || 'low';
+    qrSection.dataset.payMode = order.mode || 'median';
     qrSection.dataset.rechargeWords = order.recharge_words || 0;
     // Reset poll status
     document.getElementById('poll-status').innerHTML = '⏳ 等待支付中...';
@@ -290,7 +290,7 @@ function renderRechargeOptions(order) {
 async function changeRechargePackage(rechargeWords) {
     const qrSection = document.getElementById('payment-qr-section');
     const wordCount = parseInt(document.getElementById('pay-word-count').textContent.replace(/[^0-9]/g, ''));
-    const mode = qrSection ? (qrSection.dataset.payMode || 'low') : 'low';
+    const mode = qrSection ? (qrSection.dataset.payMode || 'median') : 'median';
     if (Number(qrSection?.dataset.rechargeWords || 0) === rechargeWords) return;
     showQRLoading();
     await createPaymentOrder(wordCount, null, mode, rechargeWords);
@@ -307,7 +307,7 @@ async function refreshQRCode() {
         const wordCount = parseInt(document.getElementById('pay-word-count').textContent.replace(/[^0-9]/g, ''));
         // ★ P1: 从 data 属性读取用户之前选的 mode，避免硬编码丢失
         const qrSection = document.getElementById('payment-qr-section');
-        const payMode = qrSection ? (qrSection.dataset.payMode || 'low') : 'low';
+        const payMode = qrSection ? (qrSection.dataset.payMode || 'median') : 'median';
         const rechargeWords = Number(qrSection?.dataset.rechargeWords || 0) || null;
 
         await createPaymentOrder(wordCount, null, payMode, rechargeWords);
@@ -412,7 +412,7 @@ function startPaymentPolling(orderId) {
 }
 
 /* ========== CREATE PAYMENT ORDER ========== */
-async function createPaymentOrder(wordCount, price, mode = 'low', rechargeWords = null) {
+async function createPaymentOrder(wordCount, price, mode = 'median', rechargeWords = null) {
     // Check login first
     if (!currentUser) {
         sessionStorage.setItem('pendingPaidAnalysis', 'true');
@@ -434,7 +434,7 @@ async function createPaymentOrder(wordCount, price, mode = 'low', rechargeWords 
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 text,
-                mode: mode || 'low',
+                mode: mode || 'median',
                 recharge_words: rechargeWords
             })
         });
@@ -596,7 +596,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const _p2 = document.getElementById('pay-btn-price');
 if (_p2) _p2.textContent = pr;
             showQRLoading();
-            createPaymentOrder(wc, pr, pendingInfo.mode || 'low');
+            createPaymentOrder(wc, pr, pendingInfo.mode || 'median');
         }, 800);
     }
 });

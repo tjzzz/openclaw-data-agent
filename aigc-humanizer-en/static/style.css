@@ -369,6 +369,77 @@ body {
 .btn-arrow { transition: transform 0.2s; }
 .btn-primary:hover .btn-arrow { transform: translateX(4px); }
 
+/* ========== REWRITE ACTION + MODE DROPDOWN ========== */
+.rewrite-action-wrap {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+}
+.btn-split {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding-right: 6px;
+}
+.btn-split-arrow {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 7px;
+    font-size: 0.9rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.2s;
+    user-select: none;
+}
+.btn-split-arrow:hover {
+    background: var(--primary-dark);
+}
+.btn-split-arrow.open {
+    background: var(--primary-dark);
+    border-radius: 7px 7px 0 0;
+}
+.mode-dropdown {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    min-width: 190px;
+    background: #fff;
+    border: 1px solid var(--gray-200);
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    padding: 5px;
+    display: none;
+    z-index: 50;
+}
+.mode-dropdown.open {
+    display: block;
+}
+.mode-dd-option {
+    display: block;
+    width: 100%;
+    padding: 7px 12px;
+    border: none;
+    background: transparent;
+    border-radius: 7px;
+    cursor: pointer;
+    font-size: 0.78rem;
+    font-weight: 400;
+    color: var(--gray-500);
+    text-align: left;
+    white-space: nowrap;
+}
+.mode-dd-option:hover {
+    color: var(--gray-700);
+}
+.mode-dd-option.active {
+    color: var(--primary);
+    font-weight: 500;
+}
+
 /* ========== LOADING ========== */
 .loading-card {
     text-align: center;

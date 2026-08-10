@@ -18,12 +18,12 @@ def _load_paragraphs(order):
         return None
 
 
-def rewrite_and_analyze(text, mode='low', paragraphs=None):
+def rewrite_and_analyze(text, mode=None, paragraphs=None):
     """执行改写与 AI 检测，返回结构化结果。余额同步与付费异步共用。
 
     Args:
         text: 待改写的原文。
-        mode: 改写粒度（low/median/high）。
+        mode: 改写粒度（low/median/high），None 时取默认（median）。
         paragraphs: 可选段落结构（list[dict]），用于结构保护。
 
     Returns:
@@ -194,8 +194,10 @@ def process_payment_success(order_id, trade_no):
     finally:
         tx_conn.close()
 
-    # Read mode from DB
-    mode = order.get('mode', 'paragraph')
+    # Read mode from DB（旧订单可能存 paragraph/academic，兼容为 low；缺省取默认 median）
+    mode = order.get('mode') or 'median'
+    if mode not in ('low', 'median', 'high'):
+        mode = 'low' if mode in ('paragraph', 'academic') else 'median'
     text = order['original_text']
     paragraphs = _load_paragraphs(order)
 
