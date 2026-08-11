@@ -2,6 +2,9 @@
 
 import json
 import logging
+import hashlib
+import threading
+import time
 from datetime import datetime, timezone
 
 
@@ -18,13 +21,111 @@ def _load_paragraphs(order):
         return None
 
 
-def rewrite_and_analyze(text, mode=None, paragraphs=None):
+# ── 原文检测结果缓存（D 方案）──
+# 缓存 /api/analyze 的原文检测，供 /api/rewrite 复用，省去重复的 sapling 调用。
+# 按文本 md5 寻址；单进程 Flask 足够，多 worker 场景未来换 Redis。
+_ORIGINAL_ANALYSIS_CACHE = {}
+_ORIGINAL_ANALYSIS_CACHE_LOCK = threading.Lock()
+_ORIGINAL_ANALYSIS_CACHE_MAX = 256
+
+
+def cache_original_analysis(text, analysis):
+    """缓存原文检测结果，返回其文本哈希。"""
+    h = hashlib.md5(text.encode('utf-8')).hexdigest()
+    with _ORIGINAL_ANALYSIS_CACHE_LOCK:
+        _ORIGINAL_ANALYSIS_CACHE[h] = analysis
+        if len(_ORIGINAL_ANALYSIS_CACHE) > _ORIGINAL_ANALYSIS_CACHE_MAX:
+            _ORIGINAL_ANALYSIS_CACHE.pop(next(iter(_ORIGINAL_ANALYSIS_CACHE)), None)
+    return h
+
+
+def get_cached_original_analysis(text):
+    """按文本取缓存的原文检测；未命中返回 None。"""
+    if not text:
+        return None
+    h = hashlib.md5(text.encode('utf-8')).hexdigest()
+    with _ORIGINAL_ANALYSIS_CACHE_LOCK:
+        return _ORIGINAL_ANALYSIS_CACHE.get(h)
+
+
+# ── 改写进度注册表 ────────────────────────────
+# 按 order_id 记录改写/检测的真实进度，供前端轮询展示。
+# SQLite 是跨 worker 的事实来源；内存只保留短期缓存。
+_REWRITE_PROGRESS = {}
+_REWRITE_PROGRESS_LOCK = threading.Lock()
+_REWRITE_PROGRESS_TTL_SECONDS = 3600
+
+
+def _prune_rewrite_progress(now=None):
+    now = now or time.monotonic()
+    expired = [key for key, value in _REWRITE_PROGRESS.items()
+               if now - value[1] > _REWRITE_PROGRESS_TTL_SECONDS]
+    for key in expired:
+        _REWRITE_PROGRESS.pop(key, None)
+
+
+def set_rewrite_progress(order_id, stage, block=None, total_blocks=None, message=""):
+    """更新某订单的改写进度。"""
+    updated_at = datetime.now(timezone.utc).isoformat()
+    progress = {
+        "stage": stage,
+        "block": block,
+        "total_blocks": total_blocks,
+        "message": message,
+        "updated_at": updated_at,
+    }
+    with _REWRITE_PROGRESS_LOCK:
+        _prune_rewrite_progress()
+        _REWRITE_PROGRESS[str(order_id)] = (progress, time.monotonic())
+
+    try:
+        from app.models import get_connection, Order
+        conn = get_connection()
+        try:
+            Order.update_progress(conn, order_id, stage, block, total_blocks,
+                                  message, updated_at)
+        finally:
+            conn.close()
+    except Exception:
+        logging.exception(f"Failed to persist rewrite progress for {order_id}")
+
+
+def get_rewrite_progress(order_id):
+    """从共享数据库读取进度，失败时回退到当前进程缓存。"""
+    try:
+        from app.models import get_connection, Order
+        conn = get_connection()
+        try:
+            progress = Order.get_progress(conn, order_id)
+            if progress:
+                return progress
+        finally:
+            conn.close()
+    except Exception:
+        logging.exception(f"Failed to read persisted rewrite progress for {order_id}")
+
+    with _REWRITE_PROGRESS_LOCK:
+        _prune_rewrite_progress()
+        cached = _REWRITE_PROGRESS.get(str(order_id))
+        return dict(cached[0]) if cached else None
+
+
+def clear_rewrite_progress(order_id):
+    """改写结束后清除进度（避免内存泄漏）。"""
+    with _REWRITE_PROGRESS_LOCK:
+        _REWRITE_PROGRESS.pop(str(order_id), None)
+
+
+def rewrite_and_analyze(text, mode=None, paragraphs=None, original_analysis=None,
+                        progress_cb=None):
     """执行改写与 AI 检测，返回结构化结果。余额同步与付费异步共用。
 
     Args:
         text: 待改写的原文。
         mode: 改写粒度（low/median/high），None 时取默认（median）。
         paragraphs: 可选段落结构（list[dict]），用于结构保护。
+        original_analysis: 可选，预计算的原文检测结果（由 /api/analyze 缓存复用）；
+            None 时重新检测，用于省去重复 sapling 调用。
 
     Returns:
         dict:
@@ -40,11 +141,19 @@ def rewrite_and_analyze(text, mode=None, paragraphs=None):
     """
     from app.extensions import humanizer_adapter, ai_detector as analyze_text
 
+    # 进度：原文检测
+    if original_analysis is None and progress_cb:
+        progress_cb(stage="detect", message="正在检测原文 AI 率")
+
     humanized, rewritten_paragraphs = humanizer_adapter.humanize_structured(
-        text, mode=mode, paragraphs=paragraphs
+        text, mode=mode, paragraphs=paragraphs, progress_cb=progress_cb
     )
-    original_analysis = analyze_text(text)
-    rewritten_analysis = analyze_text(humanized)
+    # 进度：改写后检测
+    if progress_cb:
+        progress_cb(stage="detect_again", message="正在检测改写后 AI 率")
+    if original_analysis is None:
+        original_analysis = analyze_text(text, stage="rewrite_detect_original")
+    rewritten_analysis = analyze_text(humanized, stage="rewrite_detect_rewritten")
     return {
         "humanized": humanized,
         "rewritten_paragraphs": rewritten_paragraphs,
@@ -60,10 +169,19 @@ def do_background_rewrite(order_id, text, mode, paragraphs=None):
 
     paragraphs: 可选的段落结构（list[dict]，来自订单存储），用于结构保护。
     """
+    def _progress_cb(stage, block=None, total_blocks=None, message=""):
+        set_rewrite_progress(order_id, stage, block=block,
+                             total_blocks=total_blocks, message=message)
+
     try:
         from app.models import get_connection, Order
 
-        result = rewrite_and_analyze(text, mode=mode, paragraphs=paragraphs)
+        set_rewrite_progress(order_id, "detect", message="正在检测原文 AI 率")
+        # 复用 /api/analyze 缓存的原文检测（文本一致即命中），避免后台重复检测原文
+        original_analysis = get_cached_original_analysis(text)
+        result = rewrite_and_analyze(text, mode=mode, paragraphs=paragraphs,
+                                     original_analysis=original_analysis,
+                                     progress_cb=_progress_cb)
         humanized = result["humanized"]
         rewritten_paragraphs = result["rewritten_paragraphs"]
         rewritten_analysis = result["rewritten_analysis"]
@@ -79,8 +197,20 @@ def do_background_rewrite(order_id, text, mode, paragraphs=None):
             )
         finally:
             conn.close()
+        # 改写完成：保留 done 标记供前端一次性拉取结果（不 clear，避免前端失去完成信号）
+        set_rewrite_progress(order_id, "done", message="改写完成")
+
+        # Text results are visible immediately. Format-preserving Word output
+        # is generated independently so it never delays the comparison page.
+        if rewritten_paragraphs and any(
+                item.get('source_format') == 'docx'
+                for item in rewritten_paragraphs):
+            from app.extensions import document_executor
+            from app.helpers.docx_renderer import generate_order_docx
+            document_executor.submit(generate_order_docx, order_id)
     except Exception:
         logging.exception(f"Background rewrite failed for {order_id}")
+        set_rewrite_progress(order_id, "failed", message="改写失败")
         try:
             from app.models import get_connection, Order, User, BalanceTransaction
             conn = get_connection()
@@ -113,7 +243,7 @@ def do_background_rewrite(order_id, text, mode, paragraphs=None):
             logging.exception(f"Failed to mark order {order_id} as failed")
 
 
-def process_payment_success(order_id, trade_no):
+def process_payment_success(order_id, trade_no, paid_amount=None):
     """
     Internal function to handle successful payment.
     Marks order as paid and triggers rewrite via thread pool.
@@ -134,13 +264,44 @@ def process_payment_success(order_id, trade_no):
             return False
 
         current_payment_status = order.get('payment_status', 'pending')
-        if current_payment_status != 'pending':
+        if current_payment_status == 'paid':
             tx_conn.rollback()
             logging.info(
                 f"Order {order_id} already in payment_status={current_payment_status}, "
                 f"skipping duplicate processing"
             )
-            return current_payment_status == 'paid'
+            return True
+        if current_payment_status not in ('pending', 'expired'):
+            tx_conn.rollback()
+            logging.warning(
+                "Payment confirmation rejected for order %s in status=%s",
+                order_id, current_payment_status,
+            )
+            return False
+
+        if paid_amount is not None:
+            expected_cents = round(float(order.get('price') or 0) * 100)
+            paid_cents = round(float(paid_amount) * 100)
+            if abs(paid_cents - expected_cents) > 1:
+                tx_conn.rollback()
+                logging.warning(
+                    "Payment amount mismatch for order %s: expected=%s paid=%s",
+                    order_id, order.get('price'), paid_amount,
+                )
+                return False
+
+        if trade_no:
+            duplicate = tx_conn.execute(
+                "SELECT order_id FROM orders WHERE alipay_trade_no = ? AND order_id != ?",
+                (trade_no, order_id),
+            ).fetchone()
+            if duplicate:
+                tx_conn.rollback()
+                logging.warning(
+                    "Payment trade_no %s already belongs to order %s",
+                    trade_no, duplicate['order_id'],
+                )
+                return False
 
         user_id = order['user_id']
         recharge_words = int(order.get('recharge_words') or order['word_count'])
@@ -164,9 +325,9 @@ def process_payment_success(order_id, trade_no):
             tx_conn.execute(
                 """UPDATE orders
                    SET payment_status = 'paid', status = 'awaiting_balance',
-                       alipay_trade_no = ?, paid_at = ?, balance_after = ?
-                   WHERE order_id = ? AND payment_status = 'pending'""",
-                (trade_no, datetime.now(timezone.utc).isoformat(),
+                       alipay_trade_no = ?, alipay_amount = ?, paid_at = ?, balance_after = ?
+                   WHERE order_id = ? AND payment_status IN ('pending', 'expired')""",
+                (trade_no, paid_amount, datetime.now(timezone.utc).isoformat(),
                  balance_after_recharge, order_id)
             )
             tx_conn.commit()
@@ -183,9 +344,10 @@ def process_payment_success(order_id, trade_no):
         tx_conn.execute(
             """UPDATE orders
                SET payment_status = 'paid', status = 'processing',
-                   alipay_trade_no = ?, paid_at = ?, balance_after = ?
-               WHERE order_id = ? AND payment_status = 'pending'""",
-            (trade_no, datetime.now(timezone.utc).isoformat(), balance_after, order_id)
+                   alipay_trade_no = ?, alipay_amount = ?, paid_at = ?, balance_after = ?
+               WHERE order_id = ? AND payment_status IN ('pending', 'expired')""",
+            (trade_no, paid_amount, datetime.now(timezone.utc).isoformat(),
+             balance_after, order_id)
         )
         tx_conn.commit()
     except Exception:

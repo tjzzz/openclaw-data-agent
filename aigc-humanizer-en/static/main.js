@@ -32,8 +32,8 @@ if (dropZone && fileInput) {
 
 function handleFileSelect(file) {
     const ext = file.name.split('.').pop().toLowerCase();
-    if (!['docx', 'txt', 'md'].includes(ext)) {
-        showToast('仅支持 .docx、.txt、.md 格式', 'error');
+    if (!['docx', 'pdf', 'txt', 'md'].includes(ext)) {
+        showToast('仅支持 .docx、.pdf、.txt、.md 格式', 'error');
         return;
     }
     if (file.size > 20 * 1024 * 1024) {
@@ -135,8 +135,6 @@ async function handleAnalyzeResponse(data) {
     sessionStorage.setItem('lastAiScore', aiScore);
 
     // 检测完成，不展示分析结果页，直接进入一键改写流程
-    const statusEl = document.getElementById('rewrite-status');
-    if (statusEl) statusEl.textContent = '✅ 检测完成，正在改写...';
     updateRewriteButton(wordCount, price);
     scrollToResults();
 
@@ -232,9 +230,8 @@ async function triggerRewrite(wordCount, price) {
     let paymentBalance = 0;
     let paymentShortfall = wordCount;
     const mode = getSelectedMode();
-    const statusEl = document.getElementById('rewrite-status');
-    if (statusEl) statusEl.textContent = '⏳ 正在改写...';
     showLoading();
+    // 注意：不再用 startLoadingSteps() 假估算，改为真实进度轮询驱动 setLoadingStep
     try {
         const text = getCurrentText();
         const resp = await _csrfFetch('/api/rewrite', {
@@ -244,30 +241,13 @@ async function triggerRewrite(wordCount, price) {
         });
         const data = await resp.json();
 
-        if (data.success) {
-            hideLoading();
-            if (statusEl) statusEl.textContent = '';
-            displayRewriteResult(data);
-
-            // 更新余额显示
-            if (data.payment_status === 'balance' && data.balance_remaining !== undefined) {
-                if (typeof updateNavBalance === 'function') {
-                    updateNavBalance(data.balance_remaining);
-                }
-                showToast(`✅ 改写完成！余额剩余 ${data.balance_remaining} 词`, 'success');
-            } else {
-                showToast('改写完成！', 'success');
-            }
-
-            // Baidu Tongji
-            if (typeof _hmt !== 'undefined') {
-                _hmt.push(['_trackEvent', 'engagement', 'rewrite_complete', data.payment_status || '']);
-            }
+        if (data.success && data.order_id) {
+            // 异步改写：后台线程执行，前端轮询真实进度 + 订单结果
+            startBalanceRewritePolling(data.order_id, data.balance_remaining);
             return;
         }
 
         hideLoading();
-        if (statusEl) statusEl.textContent = '';
 
         if (data.need_payment) {
             paymentBalance = data.balance || 0;
@@ -281,7 +261,6 @@ async function triggerRewrite(wordCount, price) {
         }
     } catch (err) {
         hideLoading();
-        if (statusEl) statusEl.textContent = '';
         console.warn('Balance rewrite failed, falling back to payment:', err);
     }
 
@@ -296,6 +275,112 @@ async function triggerRewrite(wordCount, price) {
     setTimeout(() => {
         createPaymentOrder(wordCount, null, mode, paymentShortfall);
     }, 300);
+}
+
+/* ========== 异步改写轮询（余额充足场景） ========== */
+let _balancePollingTimer = null;
+
+/**
+ * 直接改写（余额充足）为异步执行，这里轮询真实进度更新步骤条，
+ * 并轮询订单状态，完成后展示结果。
+ * @param {string} orderId - 后台改写订单号
+ * @param {number} balanceRemaining - 扣费后余额
+ */
+function startBalanceRewritePolling(orderId, balanceRemaining) {
+    if (_balancePollingTimer) {
+        clearInterval(_balancePollingTimer);
+    }
+    // 若当前未显示进度页（如从支付弹窗切换而来），先显示；直接改写场景已显示则跳过
+    const ls = document.getElementById('loading-section');
+    if (!ls || ls.style.display === 'none') {
+        showLoading();
+    } else {
+        resetLoadingSteps();
+    }
+    const pollingStartedAt = Date.now();
+    const pollingTimeoutMs = 15 * 60 * 1000;
+    // 每秒轮询持久化进度，兼顾实时性和数据库负载。
+    _balancePollingTimer = setInterval(async () => {
+        if (Date.now() - pollingStartedAt > pollingTimeoutMs) {
+            clearInterval(_balancePollingTimer);
+            _balancePollingTimer = null;
+            hideLoading();
+            showToast('处理时间较长，请稍后在订单记录中查看结果', 'info');
+            return;
+        }
+        try {
+            const progResp = await fetch(`/api/rewrite-progress?order_id=${encodeURIComponent(orderId)}`);
+            if (!progResp.ok) {
+                let message = '获取改写进度失败，请稍后重试';
+                try {
+                    const errorData = await progResp.json();
+                    if (errorData.error) message = errorData.error;
+                } catch (_) {
+                    // 非 JSON 错误响应使用通用提示。
+                }
+                clearInterval(_balancePollingTimer);
+                _balancePollingTimer = null;
+                hideLoading();
+                showToast(message, 'error');
+                return;
+            }
+            const prog = await progResp.json();
+            if (!prog || !prog.stage) return;
+
+            if (prog.stage === 'done') {
+                // 改写完成：进度接口已附带完整改写结果（result 字段），直接展示
+                clearInterval(_balancePollingTimer);
+                _balancePollingTimer = null;
+                setLoadingStep('detect_again', 'done');
+                finishBalanceRewrite(prog.result, balanceRemaining, orderId);
+                return;
+            }
+            if (prog.stage === 'failed') {
+                clearInterval(_balancePollingTimer);
+                _balancePollingTimer = null;
+                hideLoading();
+                showToast('改写失败，请稍后重试', 'error');
+                return;
+            }
+            // 更新进度步骤条（stage: parse/detect/rewrite/detect_again）
+            if (typeof setLoadingStep === 'function') {
+                setLoadingStep(prog.stage);
+            }
+        } catch (err) {
+            // 轮询出错静默继续
+            console.warn('Balance rewrite polling error:', err);
+        }
+    }, 1000);
+}
+
+/**
+ * 展示改写完成结果。
+ * @param {object} result - /api/rewrite-progress 返回的 result 字段（含 original/rewritten 等）
+ * @param {number} balanceRemaining - 扣费后余额（兜底）
+ * @param {string} orderId - 当前改写订单号
+ */
+function finishBalanceRewrite(result, balanceRemaining, orderId) {
+    if (!result || !result.success || !result.rewritten) {
+        // 兜底：result 缺失（可能结果还没完全落库），短暂重试轮询
+        if (orderId) {
+            setTimeout(() => startBalanceRewritePolling(orderId, balanceRemaining), 1000);
+        } else {
+            hideLoading();
+            showToast('改写结果获取失败，请稍后重试', 'error');
+        }
+        return;
+    }
+    hideLoading();
+    displayRewriteResult(result);
+    const bal = (result.balance_after !== null && result.balance_after !== undefined)
+        ? result.balance_after : balanceRemaining;
+    if (bal !== undefined && typeof updateNavBalance === 'function') {
+        updateNavBalance(bal);
+    }
+    showToast(`✅ 改写完成！余额剩余 ${bal} 词`, 'success');
+    if (typeof _hmt !== 'undefined') {
+        _hmt.push(['_trackEvent', 'engagement', 'rewrite_complete', 'balance']);
+    }
 }
 
 /* ========== FAQ ACCORDION ========== */
@@ -397,11 +482,9 @@ function renderOrders(orders, total, page, pages) {
         const rechargeMeta = o.recharge_words > 0
             ? `<span>💳 充值 ${Number(o.recharge_words).toLocaleString('zh-CN')} 词</span>`
             : '';
-        const canRehumanize = ['paid', 'balance'].includes(o.payment_status);
         const actions = isCompleted ? `
             <button class="btn btn-outline btn-sm" onclick="viewOrderDetail('${o.order_id}')">查看详情</button>
-            <button class="btn btn-outline btn-sm" onclick="reDownload('${o.order_id}', '${o.original_format === 'pdf' ? 'docx' : (o.original_format || 'txt')}')">⬇️ 下载</button>
-            ${canRehumanize ? `<button class="btn btn-primary btn-sm" onclick="reHumanize('${o.order_id}')">🔄 继续优化</button>` : ''}
+            <button class="btn btn-outline btn-sm" onclick="reDownload('${o.order_id}', '${o.original_format === 'pdf' ? 'docx' : (o.original_format || 'txt')}', this)">⬇️ 下载</button>
         ` : '';
 
         return `
@@ -460,7 +543,6 @@ async function viewOrderDetail(orderId) {
         const improvement = (order.original_score - order.rewritten_score).toFixed(1);
 
         const createdDate = order.created_at ? new Date(order.created_at).toLocaleString('zh-CN') : '';
-        const expiresDate = order.expires_at ? new Date(order.expires_at).toLocaleString('zh-CN') : '';
 
         // Show detail in a modal-like overlay using the existing modal system
         const modalBody = `
@@ -490,13 +572,8 @@ async function viewOrderDetail(orderId) {
                 <span class="order-detail-label">创建时间</span>
                 <span class="order-detail-value">${createdDate}</span>
             </div>
-            <div class="order-detail-row">
-                <span class="order-detail-label">过期时间</span>
-                <span class="order-detail-value">${expiresDate}</span>
-            </div>
-
             <div class="order-detail-actions">
-                <button class="btn btn-primary btn-full" onclick="closeDetailModal(); reDownload('${order.order_id}', '${order.original_format === 'pdf' ? 'docx' : (order.original_format || 'txt')}')">⬇️ 下载</button>
+                <button class="btn btn-primary btn-full" onclick="closeDetailModal(); reDownload('${order.order_id}', '${order.original_format === 'pdf' ? 'docx' : (order.original_format || 'txt')}', this)">⬇️ 下载</button>
             </div>
         `;
 
@@ -508,34 +585,9 @@ async function viewOrderDetail(orderId) {
     }
 }
 
-function reDownload(orderId, format) {
-    window.open(`/api/download/${orderId}?format=${format || 'txt'}`, '_blank');
-}
-
-async function reHumanize(orderId) {
-    const mode = getSelectedMode(); // 跟随当前改写模式（默认 median）
-    try {
-        showToast('⏳ 正在重新改写...', 'info');
-        const resp = await _csrfFetch(`/api/orders/${orderId}/rehumanize`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ mode })
+function reDownload(orderId, format, button) {
+    runDownloadWithButton(button, () => downloadOrderFile(orderId, format || 'txt'))
+        .catch((err) => {
+            showToast(err.message || '下载失败，请稍后重试', 'error');
         });
-        const data = await resp.json();
-
-        if (data.error) {
-            showToast(data.error, 'error');
-            return;
-        }
-
-        showToast(`✅ 改写完成！预估 AI 率降至 ${data.rewritten.ai_score}%`, 'success');
-
-        // Navigate to home page and show result
-        sessionStorage.setItem('rehumanizeResult', JSON.stringify(data));
-        window.location.href = '/';
-
-    } catch (err) {
-        showToast(getNetworkErrorMessage(err), 'error');
-        console.error('改写出错:', err);
-    }
 }

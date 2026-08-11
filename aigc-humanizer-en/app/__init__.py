@@ -47,6 +47,8 @@ def create_app():
     # ── Configuration ──
     app.config['MAX_CONTENT_LENGTH'] = 20 * 1024 * 1024  # 20MB
     app.config['UPLOAD_FOLDER'] = os.path.join(PROJ_ROOT, 'uploads')
+    app.config['SOURCE_DOCS_FOLDER'] = os.path.join(PROJ_ROOT, 'instance', 'source_docs')
+    app.config['OUTPUT_DOCS_FOLDER'] = os.path.join(PROJ_ROOT, 'instance', 'output_docs')
     app.config['PAYMENT_ADAPTER'] = PAYMENT_ADAPTER
     app.config['HUMANIZER_ADAPTER'] = HUMANIZER_ADAPTER
     app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=2)
@@ -62,6 +64,8 @@ def create_app():
 
     # ── Upload folder ──
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+    os.makedirs(app.config['SOURCE_DOCS_FOLDER'], exist_ok=True)
+    os.makedirs(app.config['OUTPUT_DOCS_FOLDER'], exist_ok=True)
 
     # ── Database ──
     from app.models import init_db
@@ -70,15 +74,14 @@ def create_app():
     # ── Adapters ──
     from app.extensions import set_adapters, set_ai_detector
     from app.payment_adapter import create_payment_adapter
-    from app.humanizer_adapter import RuleBasedHumanizer, ApiHumanizer
-    from app.detector_adapter import create_detector
+    from app.humanizer import create_humanizer
+    from app.ai_detector import create_detector
 
     payment_adapter = create_payment_adapter()
-    if app.config.get('HUMANIZER_ADAPTER') == 'api':
-        humanizer_adapter = ApiHumanizer()
-        logging.info("Using ApiHumanizer (ai-text-humanizer.com)")
-    else:
-        humanizer_adapter = RuleBasedHumanizer()
+    humanizer_adapter = create_humanizer(
+        app.config.get('HUMANIZER_ADAPTER', 'rule_based')
+    )
+    logging.info("Using %s", type(humanizer_adapter).__name__)
     set_adapters(payment_adapter, humanizer_adapter)
 
     # ── AI Detector ──

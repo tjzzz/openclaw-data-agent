@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Text Humanizer - Transform AI-generated text to appear more human-written.
+Rule-based humanizer - transform AI-generated text with local rules.
 Preserves academic tone while introducing natural variation.
 
 Note: Uses deterministic transformations based on word position to ensure
@@ -540,10 +540,33 @@ def humanize_text(text: str, academic_mode: bool = True) -> str:
     return '\n\n'.join(humanized_paragraphs).strip()
 
 
+from app.humanizer.adapter import HumanizerAdapter, _cfg
+
+
+class RuleBasedHumanizer(HumanizerAdapter):
+    """Deterministic local-rule humanizer."""
+
+    def humanize(self, text, mode=None, paragraphs=None):
+        return self.humanize_structured(text, mode=mode, paragraphs=paragraphs)[0]
+
+    def humanize_structured(self, text, mode=None, paragraphs=None, progress_cb=None):
+        if mode is None:
+            mode = _cfg('REWRITE_MODE_DEFAULT', 'median')
+
+        if paragraphs is not None:
+            def block_rewriter(body_text):
+                return humanize_text(body_text, academic_mode=True)
+
+            return self._humanize_segmented_structured(
+                mode, paragraphs, block_rewriter, progress_cb=progress_cb)
+
+        return humanize_text(text, academic_mode=True), []
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python humanize.py '<text>' [academic|casual]")
-        print("   or: python humanize.py --file <path> [academic|casual]")
+        print("Usage: python -m app.humanizer.rule_based '<text>' [academic|casual]")
+        print("   or: python -m app.humanizer.rule_based --file <path> [academic|casual]")
         sys.exit(1)
     
     mode = "academic"

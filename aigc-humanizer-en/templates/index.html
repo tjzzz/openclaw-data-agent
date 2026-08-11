@@ -105,8 +105,8 @@
                                 </svg>
                             </div>
                             <p class="drop-text">拖拽文档到此处，或 <span class="drop-link">点击选择文件</span></p>
-                            <p class="drop-hint">支持 .docx、.txt、.md，最大 20MB</p>
-                            <input type="file" id="file-input" accept=".docx,.txt,.md" hidden>
+                            <p class="drop-hint">支持 .docx、.pdf、.txt、.md，最大 20MB</p>
+                            <input type="file" id="file-input" accept=".docx,.pdf,.txt,.md" hidden>
                         </div>
 
                         <div class="divider"><span>或</span></div>
@@ -130,7 +130,6 @@
                                 </div>
                             </div>
                             <p class="upload-note">粘贴文本或上传文档，自动检测 AI 率并改写降 AIGC，保留原意与格式。</p>
-                            <p class="rewrite-status" id="rewrite-status"></p>
                         </div>
                     </form>
                 </div>
@@ -145,25 +144,25 @@
                 <div class="spinner">
                     <div class="spinner-ring"></div>
                 </div>
-                <h3 class="loading-title">正在分析你的文本...</h3>
-                <div class="loading-steps">
-                    <div class="loading-step active" id="step-1">
+                <h3 class="loading-title">正在处理，请稍候...</h3>
+                <ul class="loading-steps" id="loading-steps">
+                    <li class="loading-step" data-step="parse">
                         <span class="step-dot"></span>
-                        <span>提取文本内容</span>
-                    </div>
-                    <div class="loading-step" id="step-2">
+                        <span class="step-label">文本解析</span>
+                    </li>
+                    <li class="loading-step" data-step="detect">
                         <span class="step-dot"></span>
-                        <span>计算困惑度与突发性</span>
-                    </div>
-                    <div class="loading-step" id="step-3">
+                        <span class="step-label">内容检测</span>
+                    </li>
+                    <li class="loading-step" data-step="rewrite">
                         <span class="step-dot"></span>
-                        <span>识别 AI 写作模式</span>
-                    </div>
-                    <div class="loading-step" id="step-4">
+                        <span class="step-label">内容改写</span>
+                    </li>
+                    <li class="loading-step" data-step="detect_again">
                         <span class="step-dot"></span>
-                        <span>生成段级分析与建议</span>
-                    </div>
-                </div>
+                        <span class="step-label">改写后检测</span>
+                    </li>
+                </ul>
             </div>
         </div>
     </section>
@@ -408,11 +407,6 @@
                     <h4>快至 2 分钟</h4>
                     <p>智能改写引擎，保留学术严谨性同时大幅降低 AI 检测率</p>
                 </div>
-                <div class="feature-card">
-                    <div class="feature-icon">🔄</div>
-                    <h4>7 天无限修改</h4>
-                    <p>购买后 7 天内可反复优化调整，不限次数，无需额外付费</p>
-                </div>
             </div>
         </div>
     </section>
@@ -432,7 +426,6 @@
                         <li>✓ 修改建议生成</li>
                         <li>✓ 改写效果预览</li>
                         <li class="disabled">✗ 全文自动改写</li>
-                        <li class="disabled">✗ 7 天无限修改</li>
                     </ul>
                     <button class="btn btn-outline btn-full" onclick="scrollToUpload()">开始检测</button>
                 </div>
@@ -449,7 +442,6 @@
                         <li>✓ 段落级分析</li>
                         <li>✓ 修改建议生成</li>
                         <li>✓ 全文自动降 AI 改写</li>
-                        <li>✓ 7 天无限次修改</li>
                         <li>✓ 不达标退款保障</li>
                     </ul>
                     <button class="btn btn-primary btn-full" onclick="scrollToUpload()">立即使用</button>
@@ -463,7 +455,6 @@
                         <li>✓ 段落级详细分析</li>
                         <li>✓ 优先处理通道</li>
                         <li>✓ 月度 5000 词改写额度</li>
-                        <li>✓ 7 天无限修改</li>
                         <li class="disabled">✗ 暂未开放</li>
                     </ul>
                     <button class="btn btn-outline btn-full" disabled style="opacity:0.5;cursor:not-allowed;">即将开放</button>
@@ -507,7 +498,7 @@
                         </svg>
                     </button>
                     <div class="faq-answer">
-                        <p>我们承诺：支付后 7 天内可无限次改写同一订单，无需额外付费。如果使用主流检测平台验证后 AI 率未显著降低，可联系客服申请退款。</p>
+                        <p>如果使用主流检测平台验证后 AI 率未显著降低，请联系客服处理。</p>
                     </div>
                 </div>
                 <div class="faq-item">
@@ -518,7 +509,7 @@
                         </svg>
                     </button>
                     <div class="faq-answer">
-                        <p>支持上传 .docx（Word）、.txt 和 .md（Markdown）格式文件，同时支持直接粘贴英文文本。单个文件最大 20MB。建议使用 .docx 格式以获得最佳兼容性。</p>
+                        <p>支持上传 .docx（Word）、.pdf、.txt 和 .md（Markdown）格式文件，同时支持直接粘贴英文文本。单个文件最大 20MB。建议使用 .docx 格式以获得最佳兼容性。</p>
                     </div>
                 </div>
                 <div class="faq-item">

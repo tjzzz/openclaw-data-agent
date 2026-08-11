@@ -463,34 +463,64 @@ body {
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.loading-title { font-size: 1.1rem; color: var(--gray-700); margin-bottom: 24px; }
+.loading-title { font-size: 1.1rem; color: var(--gray-700); margin-top: 20px; }
 
-.loading-steps { text-align: left; max-width: 320px; margin: 0 auto; }
+.loading-steps {
+    list-style: none;
+    margin: 28px auto 0;
+    padding: 0;
+    max-width: 320px;
+    text-align: left;
+}
 .loading-step {
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 8px 0;
-    color: var(--gray-400);
-    font-size: 0.9rem;
-    transition: all 0.3s;
+    padding: 10px 14px;
+    margin-bottom: 8px;
+    border-radius: 8px;
+    background: var(--gray-50, #f8f9fa);
+    color: var(--gray-500, #adb5bd);
+    font-size: 0.95rem;
+    transition: all 0.25s ease;
 }
-.loading-step.active { color: var(--primary); }
-.loading-step.completed { color: var(--success); }
-
-.step-dot {
-    width: 8px;
-    height: 8px;
+.loading-step .step-dot {
+    width: 14px;
+    height: 14px;
     border-radius: 50%;
-    background: var(--gray-300);
+    border: 2px solid var(--gray-300, #dee2e6);
     flex-shrink: 0;
-    transition: all 0.3s;
+    position: relative;
+}
+.loading-step.done {
+    color: var(--gray-700);
+    background: #f0fdf4;
+}
+.loading-step.done .step-dot {
+    border-color: var(--success, #16a34a);
+    background: var(--success, #16a34a);
+}
+.loading-step.done .step-dot::after {
+    content: '✓';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: #fff;
+    font-size: 10px;
+    line-height: 1;
+}
+.loading-step.active {
+    color: var(--gray-800);
+    background: #eff6ff;
+    border: 1px solid var(--primary-light, #93c5fd);
 }
 .loading-step.active .step-dot {
-    background: var(--primary);
-    box-shadow: 0 0 0 3px rgba(79,70,229,0.2);
+    border-color: var(--primary);
+    border-top-color: transparent;
+    animation: step-spin 0.7s linear infinite;
 }
-.loading-step.completed .step-dot { background: var(--success); }
+@keyframes step-spin { to { transform: rotate(360deg); } }
 
 /* ========== RESULTS ========== */
 .result-header { margin-bottom: 32px; }

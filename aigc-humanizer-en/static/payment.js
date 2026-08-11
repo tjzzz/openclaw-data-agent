@@ -198,8 +198,6 @@ function renderPaymentQR(order, wordCount, price) {
 
     if (formHtml) {
         // ★ 方案一：iframe + document.write 写入支付宝表单（qr_pay_mode=4）
-        console.log('[支付宝] 使用 iframe document.write 渲染二维码, HTML长度:', formHtml.length);
-
         const iframe = document.createElement('iframe');
         iframe.width = '200';
         iframe.height = '200';
@@ -240,7 +238,7 @@ function renderPaymentQR(order, wordCount, price) {
                 }
             } catch (e) {
                 // 跨域安全限制下 contentWindow 不可访问，属于正常情况（已导航到支付宝域名）
-                console.log('[支付宝] iframe 已成功导航到支付宝（跨域）');
+                // 跨域说明 iframe 已离开空白页并进入支付宝。
             }
         }, 5000);
 
@@ -357,6 +355,20 @@ function startPaymentPolling(orderId) {
 
         try {
             const resp = await fetch(`/api/payment-status/${orderId}`);
+            if (!resp.ok) {
+                let message = '支付状态查询失败，请稍后重试';
+                try {
+                    const errorData = await resp.json();
+                    if (errorData.error) message = errorData.error;
+                } catch (_) {
+                    // 非 JSON 错误响应使用通用提示。
+                }
+                clearInterval(pollInterval);
+                pollInterval = null;
+                document.getElementById('poll-status').textContent = '❌ ' + message;
+                showToast(message, 'error');
+                return;
+            }
             const data = await resp.json();
 
             if (data.error) {
@@ -376,23 +388,13 @@ function startPaymentPolling(orderId) {
             }
 
             if (data.payment_status === 'paid' || data.status === 'processing') {
-                document.getElementById('poll-status').innerHTML = '✅ 充值成功，已自动扣费，正在改写...';
-            }
-
-            if (data.status === 'completed' && data.success) {
+                // 充值成功，进入改写阶段：切换到主页面真实进度页，而不是停在充值弹窗
+                document.getElementById('poll-status').innerHTML = '✅ 充值成功，正在改写...';
                 clearInterval(pollInterval);
+                pollInterval = null;
                 closePaymentModal();
-                displayRewriteResult(data);
-                if (typeof updateNavBalance === 'function' && data.balance_after !== null) {
-                    updateNavBalance(data.balance_after);
-                }
-                showToast(`改写完成！余额剩余 ${data.balance_after || 0} 词`, 'success');
-
-                // Baidu Tongji: track payment success + rewrite complete
-                if (typeof _hmt !== 'undefined') {
-                    _hmt.push(['_trackEvent', 'ecommerce', 'payment_success', '', data.price || 0]);
-                    _hmt.push(['_trackEvent', 'engagement', 'rewrite_complete']);
-                }
+                startBalanceRewritePolling(orderId, data.balance_after);
+                return;
             }
 
             if (data.status === 'failed') {
@@ -412,10 +414,56 @@ function startPaymentPolling(orderId) {
 }
 
 /* ========== CREATE PAYMENT ORDER ========== */
+function savePendingPayment(wordCount, price, mode, rechargeWords) {
+    sessionStorage.setItem('pendingPaidAnalysis', 'true');
+    sessionStorage.setItem('pendingPaymentInfo', JSON.stringify({
+        wordCount,
+        price,
+        mode: mode || 'median',
+        rechargeWords
+    }));
+}
+
+function resumePendingPayment() {
+    if (!currentUser || sessionStorage.getItem('pendingPaidAnalysis') !== 'true') return false;
+
+    let pendingInfo;
+    try {
+        pendingInfo = JSON.parse(sessionStorage.getItem('pendingPaymentInfo') || 'null');
+    } catch (err) {
+        pendingInfo = null;
+    }
+
+    const wordCount = Number(pendingInfo?.wordCount);
+    const price = Number(pendingInfo?.price);
+    if (!Number.isFinite(wordCount) || wordCount <= 0 ||
+        !Number.isFinite(price) || price < 0) {
+        sessionStorage.removeItem('pendingPaidAnalysis');
+        sessionStorage.removeItem('pendingPaymentInfo');
+        return false;
+    }
+
+    sessionStorage.removeItem('pendingPaidAnalysis');
+    sessionStorage.removeItem('pendingPaymentInfo');
+    setTimeout(() => {
+        const aiScore = Number(sessionStorage.getItem('lastAiScore') || 0);
+        const shortfall = Number(pendingInfo.rechargeWords) || wordCount;
+        const balance = Math.max(0, wordCount - shortfall);
+        showPaymentModalWithAiScore(wordCount, price, aiScore, balance, shortfall);
+        createPaymentOrder(
+            wordCount,
+            price,
+            pendingInfo.mode || 'median',
+            pendingInfo.rechargeWords ?? null
+        );
+    }, 300);
+    return true;
+}
+
 async function createPaymentOrder(wordCount, price, mode = 'median', rechargeWords = null) {
     // Check login first
     if (!currentUser) {
-        sessionStorage.setItem('pendingPaidAnalysis', 'true');
+        savePendingPayment(wordCount, price, mode, rechargeWords);
         showAuthModal('login');
         showToast('请先登录，登录后将自动创建订单', 'info');
         return;
@@ -442,7 +490,7 @@ async function createPaymentOrder(wordCount, price, mode = 'median', rechargeWor
 
         if (data.error) {
             if (data.login_required) {
-                sessionStorage.setItem('pendingPaidAnalysis', 'true');
+                savePendingPayment(wordCount, price, mode, rechargeWords);
                 closePaymentModal();
                 showAuthModal('login');
                 return;
@@ -471,9 +519,8 @@ async function createPaymentOrder(wordCount, price, mode = 'median', rechargeWor
 /* ========== LEGACY: PAID ANALYSIS ========== */
 async function startPaidAnalysis() {
     if (!currentUser) {
-        sessionStorage.setItem('pendingPaidAnalysis', 'true');
         showAuthModal('login');
-        showToast('请先登录，登录后将自动跳转到付费检测', 'info');
+        showToast('请先登录后继续', 'info');
         return;
     }
     createPaymentOrder();
@@ -532,15 +579,20 @@ function displayRewriteResult(data) {
 }
 
 /* ========== DOWNLOAD ========== */
-function downloadResult() {
+async function downloadResult() {
+    const downloadBtn = document.getElementById('download-btn');
     if (latestResult) {
-        // Download via server API for format-aware output
-        const fmt = latestResult.originalFormat;
-        window.open(`/api/download/${latestResult.orderId}?format=${fmt}`, '_blank');
+        try {
+            await runDownloadWithButton(
+                downloadBtn,
+                () => downloadOrderFile(latestResult.orderId, latestResult.originalFormat)
+            );
+        } catch (err) {
+            showToast(err.message || '下载失败，请稍后重试', 'error');
+        }
     } else {
         // Fallback: client-side text download
-        const text = document.getElementById('rewrite-new-text').textContent;
-        const blob = new Blob([text], { type: 'text/plain' });
+        const blob = new Blob([_rewriteNewText], { type: 'text/plain' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -571,32 +623,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Fetch payment config on page load
     fetchPaymentConfig();
 
-    // Original rehumanize result check
-    const resultStr = sessionStorage.getItem('rehumanizeResult');
-    if (resultStr) {
-        try {
-            const data = JSON.parse(resultStr);
-            sessionStorage.removeItem('rehumanizeResult');
-            setTimeout(() => displayRewriteResult(data), 500);
-        } catch (e) { /* ignore */ }
-    }
-
-    // Pending paid analysis after login - auto create payment order
-    const pendingPaid = sessionStorage.getItem('pendingPaidAnalysis');
-    if (pendingPaid) {
-        sessionStorage.removeItem('pendingPaidAnalysis');
-        const pendingInfo = JSON.parse(sessionStorage.getItem('pendingPaymentInfo') || '{}');
-        sessionStorage.removeItem('pendingPaymentInfo');
-        const wc = pendingInfo.wordCount || 0;
-        const pr = pendingInfo.price || 0;
-        setTimeout(() => {
-            showPaymentModal();
-            document.getElementById('pay-word-count').textContent = wc + ' 词';
-            document.getElementById('pay-price').textContent = '¥' + pr;
-            const _p2 = document.getElementById('pay-btn-price');
-if (_p2) _p2.textContent = pr;
-            showQRLoading();
-            createPaymentOrder(wc, pr, pendingInfo.mode || 'median');
-        }, 800);
-    }
+    loginStatusPromise.then((user) => {
+        if (user) resumePendingPayment();
+    });
 });

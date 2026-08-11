@@ -159,6 +159,11 @@ class Order:
                 alipay_amount REAL,
                 alipay_qr_code TEXT,
                 paid_at TEXT,
+                source_file_key TEXT,
+                output_file_key TEXT,
+                document_status TEXT DEFAULT 'not_applicable',
+                document_error TEXT,
+                document_updated_at TEXT,
                 created_at TEXT NOT NULL,
                 expires_at TEXT NOT NULL,
                 FOREIGN KEY (user_id) REFERENCES users(id)
@@ -189,6 +194,30 @@ class Order:
             conn.execute("ALTER TABLE orders ADD COLUMN paragraphs TEXT")
         if 'rewritten_paragraphs' not in columns:
             conn.execute("ALTER TABLE orders ADD COLUMN rewritten_paragraphs TEXT")
+        if 'progress_stage' not in columns:
+            conn.execute("ALTER TABLE orders ADD COLUMN progress_stage TEXT")
+        if 'progress_block' not in columns:
+            conn.execute("ALTER TABLE orders ADD COLUMN progress_block INTEGER")
+        if 'progress_total_blocks' not in columns:
+            conn.execute("ALTER TABLE orders ADD COLUMN progress_total_blocks INTEGER")
+        if 'progress_message' not in columns:
+            conn.execute("ALTER TABLE orders ADD COLUMN progress_message TEXT")
+        if 'progress_updated_at' not in columns:
+            conn.execute("ALTER TABLE orders ADD COLUMN progress_updated_at TEXT")
+        if 'source_file_key' not in columns:
+            conn.execute("ALTER TABLE orders ADD COLUMN source_file_key TEXT")
+        if 'output_file_key' not in columns:
+            conn.execute("ALTER TABLE orders ADD COLUMN output_file_key TEXT")
+        if 'document_status' not in columns:
+            conn.execute("ALTER TABLE orders ADD COLUMN document_status TEXT DEFAULT 'not_applicable'")
+        if 'document_error' not in columns:
+            conn.execute("ALTER TABLE orders ADD COLUMN document_error TEXT")
+        if 'document_updated_at' not in columns:
+            conn.execute("ALTER TABLE orders ADD COLUMN document_updated_at TEXT")
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_alipay_trade_no "
+            "ON orders(alipay_trade_no) WHERE alipay_trade_no IS NOT NULL"
+        )
         conn.commit()
 
 
@@ -226,6 +255,35 @@ class Order:
         conn.commit()
 
     @classmethod
+    def create_processing_order(cls, conn, user_id, order_id, original_text,
+                                original_format, original_filename, word_count,
+                                price, mode, paragraphs=None, source_file_key=None):
+        """Create a balance-deducted order in 'processing' status (async rewrite).
+
+        与 create_balance_order 的区别：直接改写现改为异步（后台线程改写），
+        订单先以 status='processing' 入库，改写完成后由 update_result 置为 'completed'。
+        """
+        import json
+        created_at = datetime.now(timezone.utc).isoformat()
+        expires_at = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+        paragraphs_json = json.dumps(paragraphs, ensure_ascii=False) if paragraphs else None
+        conn.execute(
+            """INSERT INTO orders
+               (user_id, order_id, original_text, paragraphs, rewritten_text,
+                original_format, original_filename, word_count, price, mode,
+                original_score, rewritten_score, status, payment_status,
+                balance_words_used, balance_after, source_file_key,
+                document_status, created_at, expires_at)
+               VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, NULL, NULL, 'processing', 'balance', ?, ?, ?, ?, ?, ?)""",
+            (user_id, order_id, original_text, paragraphs_json,
+             original_format, original_filename, word_count, price, mode,
+             word_count, User.get_balance(conn, user_id), source_file_key,
+             'pending' if source_file_key else 'not_applicable', created_at, expires_at)
+        )
+        conn.commit()
+        return cls.get_by_order_id(conn, order_id)
+
+    @classmethod
     def get_by_user_id(cls, conn, user_id, page=1, per_page=10,
                        payment_status=None, history_only=False):
         """Get paginated orders for a user. Returns (orders_list, total_count)."""
@@ -258,21 +316,36 @@ class Order:
         return dict(row) if row else None
 
     @classmethod
-    def update_rewrite(cls, conn, order_id, rewritten_text, rewritten_score,
-                       rewritten_paragraphs=None):
-        """Update the rewritten text and score for an existing order."""
-        import json
-        paragraphs_json = json.dumps(
-            rewritten_paragraphs, ensure_ascii=False
-        ) if rewritten_paragraphs else None
+    def update_progress(cls, conn, order_id, stage, block=None,
+                        total_blocks=None, message="", updated_at=None):
+        """Persist rewrite progress so every web worker sees the same state."""
         conn.execute(
             """UPDATE orders
-               SET rewritten_text = ?, rewritten_score = ?,
-                   rewritten_paragraphs = ?
+               SET progress_stage = ?, progress_block = ?,
+                   progress_total_blocks = ?, progress_message = ?,
+                   progress_updated_at = ?
                WHERE order_id = ?""",
-            (rewritten_text, rewritten_score, paragraphs_json, order_id)
+            (stage, block, total_blocks, message, updated_at, order_id)
         )
         conn.commit()
+
+    @classmethod
+    def get_progress(cls, conn, order_id):
+        row = conn.execute(
+            """SELECT progress_stage, progress_block, progress_total_blocks,
+                      progress_message, progress_updated_at
+               FROM orders WHERE order_id = ?""",
+            (order_id,)
+        ).fetchone()
+        if not row or not row['progress_stage']:
+            return None
+        return {
+            "stage": row['progress_stage'],
+            "block": row['progress_block'],
+            "total_blocks": row['progress_total_blocks'],
+            "message": row['progress_message'] or "",
+            "updated_at": row['progress_updated_at'],
+        }
 
     # ========== Payment-related methods ==========
 
@@ -280,7 +353,7 @@ class Order:
     def create_payment_record(cls, conn, user_id, order_id, original_text,
                                original_format, original_filename, word_count,
                                price, mode, recharge_words, balance_words_used,
-                               paragraphs=None):
+                               paragraphs=None, source_file_key=None):
         """Create a pending auto-recharge order tied to a rewrite task.
 
         paragraphs: 可选的段落结构（list[dict]，含 style/is_heading/is_reference
@@ -296,11 +369,12 @@ class Order:
                 original_format, original_filename, word_count, price, mode,
                 original_score, rewritten_score, status, payment_status,
                 alipay_amount, recharge_words, balance_words_used,
-                created_at, expires_at)
-               VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, NULL, NULL, 'pending', 'pending', ?, ?, ?, ?, ?)""",
+                source_file_key, document_status, created_at, expires_at)
+               VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, NULL, NULL, 'pending', 'pending', ?, ?, ?, ?, ?, ?, ?)""",
             (user_id, order_id, original_text, paragraphs_json,
              original_format, original_filename,
              word_count, price, mode, price, recharge_words, balance_words_used,
+             source_file_key, 'pending' if source_file_key else 'not_applicable',
              created_at, expires_at)
         )
         conn.commit()

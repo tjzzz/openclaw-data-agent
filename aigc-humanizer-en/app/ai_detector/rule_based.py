@@ -264,11 +264,18 @@ def calculate_structure_score(text: str) -> Dict:
     }
 
 
-def analyze_text(text: str) -> Dict:
+def analyze_text(text: str, stage: str = "analyze") -> Dict:
     """
     Main analysis function that combines all detection methods.
     Returns comprehensive AI detection report.
+
+    Args:
+        text: 待检测文本（≥50 字符）。
+        stage: 调用场景标识（analyze / rewrite_detect），用于日志规范。
     """
+    import time as _t
+    import logging as _lg
+    _start = _t.time()
     if not text or len(text.strip()) < 50:
         return {
             "error": "Text too short for analysis (minimum 50 characters)",
@@ -328,7 +335,7 @@ def analyze_text(text: str) -> Dict:
         risk_level = "High Risk"
         risk_description = "Strong humanization recommended before submission."
     
-    return {
+    result = {
         "ai_score": round(ai_score, 1),
         "risk_level": risk_level,
         "risk_description": risk_description,
@@ -364,12 +371,17 @@ def analyze_text(text: str) -> Dict:
         },
         "threshold_note": "Turnitin flags submissions at 20% AI or above"
     }
+    _lg.getLogger("app.ai_detector.rule_based").info(
+        "detect stage=%s backend=rule_based action=done ai_score=%.1f words=%d elapsed=%.0fms",
+        stage, result["ai_score"], len(text.split()), (_t.time() - _start) * 1000,
+    )
+    return result
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python ai_checker.py '<text>'")
-        print("   or: python ai_checker.py --file <path>")
+        print("Usage: python -m app.ai_detector.rule_based '<text>'")
+        print("   or: python -m app.ai_detector.rule_based --file <path>")
         sys.exit(1)
     
     if sys.argv[1] == "--file":

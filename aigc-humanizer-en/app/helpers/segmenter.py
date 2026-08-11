@@ -3,8 +3,7 @@
 按文档结构把段落分组，供改写时决定"每次送 API 的文本块大小"。
 
 核心能力：
-    1. 结构保护（should_protect）—— 标题/图表/目录/短段 不改写
-    2. 标题栈归属 —— 把正文段挂到最近的激活标题下
+    1. 结构保护（should_protect）—— 标题/目录/短段等不改写
     3. 三种 mode 粒度：
         - low   : 单段（兼容旧值 paragraph）
         - median: 按二级标题(Heading 2)分块
@@ -42,7 +41,6 @@ class _StructureGuard:
     """段落保护判定器。
 
     基于 extract_text 阶段已标记好的段落属性做判断：
-        - 表格占位 {'table': N}
         - 标题/目录类（is_heading=True）
         - 参考文献条目（is_reference=True，在 extract_text 阶段已标记）
         - 无格式正文且过短（< min_words）
@@ -57,19 +55,20 @@ class _StructureGuard:
     def should_protect(self, para):
         if not para:
             return True
-        # 表格占位
+        # Tables are layout-only nodes at this stage. They are neither sent to
+        # rewriting nor treated as boundaries between surrounding paragraphs.
         if "table" in para:
-            return True
+            return False
         text = (para.get("text") or "").strip()
         if not text:
             return True
 
-        # 参考文献条目（extract_text 已标记）
-        if para.get("is_reference"):
-            return True
-
-        # 标题/目录类样式
-        if para.get("is_heading", False):
+        # 结构化内容由 extract_text 预先标记，统一跳过改写。
+        protected_flags = (
+            "is_reference", "is_code_block", "has_image",
+            "has_hyperlink", "is_heading",
+        )
+        if any(para.get(flag) for flag in protected_flags):
             return True
 
         words = para.get("word_count", len(text.split()))
@@ -101,7 +100,8 @@ def segment(paragraphs, mode="low", min_words=10,
         high  = 连续正文段聚合（默认最多 5 段 / 总字数<max_words）
 
     聚合规则（median/high 共用，仅可聚合段落数不同）：
-        - 标题 / 表格 / 参考文献 / 短段 是硬边界，不聚合进 part，原样保留
+        - 标题 / 参考文献 / 短段是硬边界，不聚合进 part，原样保留
+        - 表格暂时跳过，不送审，也不打断表格前后的正文聚合
         - 相邻的正文段聚合成一个 part，最多 max_paras 段 且 总字数 < max_words
         - 达到任一上限即开启新的 part
         - 当 max_paras == 1 时，等价于 low（每段独立一次请求）
@@ -128,20 +128,42 @@ def segment(paragraphs, mode="low", min_words=10,
 
     # 1) 单段模式：每段独立判断，保护段原样、正文段单独送
     if mode == "low":
-        return _segment_paragraph(paragraphs, guard)
+        tasks = _segment_paragraph(paragraphs, guard)
+        return _finalize_tasks(tasks)
 
     # 2) median/high：先逐段打标记，再在连续正文之间按 N 段聚合
     max_paras = high_paras if mode == "high" else median_paras
     if max_paras <= 1:
-        return _segment_paragraph(paragraphs, guard)
-    return _segment_aggregate(paragraphs, guard, max_paras, max_words)
+        tasks = _segment_paragraph(paragraphs, guard)
+    else:
+        tasks = _segment_aggregate(paragraphs, guard, max_paras, max_words)
+    return _finalize_tasks(tasks)
+
+
+def _finalize_tasks(tasks):
+    """Attach aggregate identity without discarding source-node identity."""
+    rewrite_index = 0
+    for task_index, task in enumerate(tasks):
+        source_nodes = task.get("paragraphs") or []
+        task["task_id"] = f"segment-{task_index:04d}"
+        task["source_node_ids"] = [
+            node["node_id"] for node in source_nodes if node.get("node_id")
+        ]
+        task["source_body_indexes"] = [
+            node["body_index"] for node in source_nodes
+            if node.get("body_index") is not None
+        ]
+        if task["type"] == "rewrite":
+            task["block_id"] = f"rewrite-block-{rewrite_index:04d}"
+            rewrite_index += 1
+    return tasks
 
 
 def _segment_paragraph(paragraphs, guard):
     tasks = []
     for para in paragraphs:
         if "table" in para:
-            tasks.append({"type": "table", "paragraphs": [para]})
+            continue
         elif guard.should_protect(para):
             tasks.append({"type": "protected", "text": para["text"],
                           "paragraphs": [para]})
@@ -158,7 +180,8 @@ def _count_words(para):
 def _segment_aggregate(paragraphs, guard, max_paras, max_words):
     """连续正文段按 max_paras 段 + max_words 字聚合为一个 rewrite part。
 
-    硬边界（表格/标题/参考文献/短段）作为分割点，不聚合进 part。
+    硬边界（标题/参考文献/短段）作为分割点，不聚合进 part。
+    表格节点暂时忽略，前后正文仍可进入同一个聚合块。
     """
     tasks = []
     buffer = []      # 当前聚合的正文段
@@ -175,8 +198,7 @@ def _segment_aggregate(paragraphs, guard, max_paras, max_words):
 
     for para in paragraphs:
         if "table" in para:
-            flush()
-            tasks.append({"type": "table", "paragraphs": [para]})
+            continue
         elif guard.should_protect(para):
             # 标题 / 参考文献 / 短段 是硬边界
             flush()

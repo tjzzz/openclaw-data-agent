@@ -86,102 +86,127 @@ def api_rewrite():
 
     price = round(PRICE_PER_1000_WORDS * (word_count / 1000), 2)
 
+    # ── 异步改写：建 processing 订单 → 后台线程改写 → 立即返回 order_id ──
     try:
-        # 传入段落结构（若存在），实现结构保护：标题/表格/参考文献/短段不改写
         paragraphs = session.get('last_paragraphs')
-        result = rewrite_and_analyze(text, mode=mode, paragraphs=paragraphs)
-        humanized = result["humanized"]
-        rewritten_structured = result["rewritten_paragraphs"]
-        original_analysis = result["original_analysis"]
-        rewritten_analysis = result["rewritten_analysis"]
-
-        # Build paragraph comparison for frontend display
-        original_paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
-        rewritten_paragraphs = [p.strip() for p in humanized.split('\n\n') if p.strip()]
-
-        paragraph_comparison = []
-        for i, (orig_p, new_p) in enumerate(zip(original_paragraphs, rewritten_paragraphs)):
-            if len(orig_p) >= 100 and len(new_p) >= 100:
-                paragraph_comparison.append({
-                    "index": i,
-                    "original_preview": orig_p[:150] + "..." if len(orig_p) > 150 else orig_p,
-                    "rewritten_preview": new_p[:150] + "..." if len(new_p) > 150 else new_p,
-                    "original_score": round(original_analysis['ai_score'], 1),
-                    "rewritten_score": round(rewritten_analysis['ai_score'], 1),
-                    "reduction": round(original_analysis['ai_score'] - rewritten_analysis['ai_score'], 1)
-                })
-
-        # Save order record
         original_format = session.get('last_original_format', 'txt')
         original_filename = session.get('last_original_filename', None)
-        try:
-            conn = get_db()
-            Order.create_balance_order(
-                conn,
-                user_id=user_id,
-                order_id=order_id,
-                original_text=text,
-                rewritten_text=humanized,
-                original_format=original_format,
-                original_filename=original_filename,
-                word_count=word_count,
-                price=price,
-                mode=mode,
-                original_score=original_analysis.get('ai_score', 0),
-                rewritten_score=rewritten_analysis.get('ai_score', 0),
-                rewritten_paragraphs=rewritten_structured
-            )
-        except Exception:
-            logging.exception("Failed to save order record, but rewrite result was returned")
+        source_file_key = session.get('last_source_file_key')
 
-        # Store in session for unauthenticated download fallback
-        session['last_rewritten'] = {
-            'original': text,
-            'rewritten': humanized,
-            'original_score': original_analysis.get('ai_score', 0),
-            'rewritten_score': rewritten_analysis.get('ai_score', 0),
-            'order_id': order_id
-        }
+        # 建 processing 订单（改写结果由后台线程写回）
+        conn = get_db()
+        Order.create_processing_order(
+            conn,
+            user_id=user_id,
+            order_id=order_id,
+            original_text=text,
+            original_format=original_format,
+            original_filename=original_filename,
+            word_count=word_count,
+            price=price,
+            mode=mode,
+            paragraphs=paragraphs,
+            source_file_key=source_file_key
+        )
 
-        response_data = {
+        # 提交后台改写线程（复用支付后改写的 do_background_rewrite，含进度写入）
+        from app.extensions import rewrite_executor
+        from app.helpers.tasks import do_background_rewrite
+        rewrite_executor.submit(do_background_rewrite, order_id, text, mode, paragraphs)
+
+        return jsonify({
             "success": True,
             "order_id": order_id,
+            "status": "processing",
             "payment_status": payment_status,
-            "original": {
-                "text": text,
-                "ai_score": round(original_analysis['ai_score'], 1),
-                "risk_level": original_analysis['risk_level']
-            },
-            "rewritten": {
-                "text": humanized,
-                "ai_score": round(rewritten_analysis['ai_score'], 1),
-                "risk_level": rewritten_analysis['risk_level']
-            },
-            "improvement": round(original_analysis['ai_score'] - rewritten_analysis['ai_score'], 1),
-            "paragraph_comparison": paragraph_comparison,
-            "original_format": original_format,
-            "original_filename": original_filename
-        }
-
-        if payment_status == 'balance':
-            response_data["balance_remaining"] = User.get_balance(get_db(), user_id)
-
-        return jsonify(response_data)
+            "balance_remaining": User.get_balance(get_db(), user_id)
+        })
 
     except Exception:
-        if payment_status == 'balance' and balance_deducted:
+        # 建单/提交线程失败时回滚扣费
+        if balance_deducted:
             try:
                 conn = get_db()
                 User.add_balance(conn, user_id, balance_deducted)
                 balance_after = User.get_balance(conn, user_id)
                 BalanceTransaction.create(
                     conn, user_id, 'rewrite_refund', balance_deducted,
-                    balance_after, order_id=order_id, description='改写失败退回词数'
+                    balance_after, order_id=order_id, description='改写任务启动失败退回词数'
                 )
                 conn.commit()
-                logging.warning(f"[BALANCE] Refunded {balance_deducted} words to user {user_id} after rewrite failure")
+                logging.warning(f"[BALANCE] Refunded {balance_deducted} words to user {user_id} after rewrite start failure")
             except Exception:
                 conn.rollback()
                 logging.exception(f"[BALANCE] Failed to refund {balance_deducted} words to user {user_id}")
-        logging.exception("Rewrite failed")
+        logging.exception("Rewrite start failed")
         return jsonify({"error": "改写出错，请稍后重试"}), 500
+
+
+@rewrite_bp.route('/api/rewrite-progress', methods=['GET'])
+@login_required
+def api_rewrite_progress():
+    """查询某订单的改写/检测真实进度（供前端轮询步骤条）。
+
+    stage='done' 时顺带返回完整改写结果（result 字段），供前端直接展示，
+    无需再查 /api/payment-status（该接口只负责支付状态）。
+    """
+    from app.helpers.tasks import get_rewrite_progress
+    from app.models import Order, User
+    order_id = request.args.get('order_id', '')
+    if not order_id:
+        return jsonify({"error": "缺少 order_id"}), 400
+
+    # Validate ownership before exposing even the task stage. Otherwise an
+    # authenticated user could enumerate order IDs and observe other users'
+    # rewrite activity, then receive the full text once the task completes.
+    conn = get_db()
+    order = Order.get_by_order_id(conn, order_id)
+    if not order:
+        return jsonify({"error": "订单不存在"}), 404
+    if order['user_id'] != session.get('user_id'):
+        return jsonify({"error": "无权访问该订单"}), 403
+
+    progress = get_rewrite_progress(order_id)
+    if not progress:
+        if order.get('status') == 'completed':
+            progress = {"stage": "done", "message": "改写完成"}
+        elif order.get('status') == 'failed':
+            progress = {"stage": "failed", "message": "改写失败"}
+        else:
+            progress = {"stage": "detect", "message": "正在处理改写任务"}
+
+    # Do not mutate the process-wide progress cache when attaching user data.
+    progress = dict(progress)
+
+    if progress.get('stage') == 'done':
+        # 改写完成：从 DB 读改写结果，附带 result 字段
+        if order and order.get('status') == 'completed' and order.get('rewritten_text'):
+            from app.helpers import derive_risk_level
+            original_score = order.get('original_score', 0) or 0
+            rewritten_score = order.get('rewritten_score', 0) or 0
+            user_id = session.get('user_id')
+            balance_after = User.get_balance(conn, user_id) if user_id else None
+            progress['result'] = {
+                "success": True,
+                "order_id": order_id,
+                "original": {
+                    "text": order['original_text'],
+                    "ai_score": round(original_score, 1),
+                    "risk_level": derive_risk_level(original_score)
+                },
+                "rewritten": {
+                    "text": order['rewritten_text'],
+                    "ai_score": round(rewritten_score, 1),
+                    "risk_level": derive_risk_level(rewritten_score)
+                },
+                "improvement": round(original_score - rewritten_score, 1),
+                "original_format": order.get('original_format', 'txt'),
+                "original_filename": order.get('original_filename'),
+                "balance_after": balance_after
+            }
+        else:
+            # 进度缓存可能先于订单结果可见；结果未就绪时继续轮询，避免前端收到空 done。
+            progress = {"stage": "detect_again", "message": "正在保存改写结果"}
+    response = jsonify(progress)
+    response.headers['Cache-Control'] = 'no-store, private'
+    return response

@@ -181,21 +181,7 @@ async function handleLogin() {
         // Baidu Tongji: track login success
         if (typeof _hmt !== 'undefined') _hmt.push(['_trackEvent', 'user', 'login_success']);
 
-        // Check for pending paid analysis after login
-        const pendingPaid = sessionStorage.getItem('pendingPaidAnalysis');
-        if (pendingPaid) {
-            sessionStorage.removeItem('pendingPaidAnalysis');
-            const pendingInfo = JSON.parse(sessionStorage.getItem('pendingPaymentInfo') || '{}');
-            sessionStorage.removeItem('pendingPaymentInfo');
-            const wc = pendingInfo.wordCount || 0;
-            const pr = pendingInfo.price || 0;
-            setTimeout(() => {
-                const aiScore = parseInt(sessionStorage.getItem('lastAiScore') || '0');
-                showPaymentModalWithAiScore(wc, pr, aiScore);
-                showQRLoading();
-                createPaymentOrder(wc, pr, pendingInfo.mode || 'median');
-            }, 500);
-        }
+        if (typeof resumePendingPayment === 'function') resumePendingPayment();
 
         // Clear login fields
         document.getElementById('login-email').value = '';
@@ -264,21 +250,7 @@ async function handleRegister() {
         // Baidu Tongji: track register success
         if (typeof _hmt !== 'undefined') _hmt.push(['_trackEvent', 'user', 'register_success']);
 
-        // Check for pending paid analysis after register
-        const pendingPaid = sessionStorage.getItem('pendingPaidAnalysis');
-        if (pendingPaid) {
-            sessionStorage.removeItem('pendingPaidAnalysis');
-            const pendingInfo = JSON.parse(sessionStorage.getItem('pendingPaymentInfo') || '{}');
-            sessionStorage.removeItem('pendingPaymentInfo');
-            const wc = pendingInfo.wordCount || 0;
-            const pr = pendingInfo.price || 0;
-            setTimeout(() => {
-                const aiScore = parseInt(sessionStorage.getItem('lastAiScore') || '0');
-                showPaymentModalWithAiScore(wc, pr, aiScore);
-                showQRLoading();
-                createPaymentOrder(wc, pr, pendingInfo.mode || 'median');
-            }, 500);
-        }
+        if (typeof resumePendingPayment === 'function') resumePendingPayment();
 
         // Clear register fields
         document.getElementById('register-email').value = '';

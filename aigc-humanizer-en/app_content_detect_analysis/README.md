@@ -19,7 +19,7 @@
 ## 备份的函数
 
 ### 1. analyze_by_paragraphs（段落分析）
-原位置：`app/ai_checker.py`
+原位置：`app/ai_detector/rule_based.py`
 
 ```python
 def analyze_by_paragraphs(text: str) -> List[Dict]:
@@ -43,7 +43,7 @@ def analyze_by_paragraphs(text: str) -> List[Dict]:
 依赖：`analyze_text`（保留）、`split_sentences`（保留）。
 
 ### 2. _make_paragraph_analyzer（API 段落分析生成器）
-原位置：`app/detector_adapter.py`
+原位置：`app/ai_detector/adapter.py`
 
 ```python
 def _make_paragraph_analyzer(detect_fn):

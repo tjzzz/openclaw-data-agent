@@ -94,10 +94,12 @@ def api_create_payment():
     try:
         # 保存段落结构（含 style/is_heading/is_reference），供异步改写做结构保护
         paragraphs = session.get('last_paragraphs')
+        source_file_key = session.get('last_source_file_key')
         Order.create_payment_record(
             conn, user_id, order_id, text, original_format, original_filename,
             word_count, price, mode, recharge_words, min(balance, word_count),
-            paragraphs=paragraphs
+            paragraphs=paragraphs,
+            source_file_key=source_file_key
         )
         logging.info(
             f"[PAYMENT] Recharge order created: {order_id}, user={user_id}, "
@@ -176,8 +178,6 @@ def api_payment_status(order_id):
     user_id = session.get('user_id')
     conn = get_db()
 
-    Order.expire_old_orders(conn)
-
     order = Order.get_by_order_id(conn, order_id)
     logging.info(f"[POLL] order_id={order_id}, user={user_id}, found={order is not None}")
     if not order:
@@ -199,13 +199,25 @@ def api_payment_status(order_id):
             )
             if query_result.get('status') == 'paid':
                 trade_no = query_result.get('trade_no') or f"QUERY_{order_id}"
-                process_payment_success(order_id, trade_no)
+                processed = process_payment_success(
+                    order_id, trade_no, query_result.get('total_amount')
+                )
+                if not processed:
+                    logging.warning("Queried payment failed validation for %s", order_id)
                 # Refresh order from DB to get updated status
                 order = Order.get_by_order_id(conn, order_id)
                 payment_status = order.get('payment_status', 'paid')
                 status = order.get('status', 'processing')
         except Exception:
             logging.warning("Payment query failed, returning current status", exc_info=True)
+
+        # Query the gateway before expiring locally, so a payment completed near
+        # the deadline cannot be hidden by our own expiration update.
+        if payment_status == 'pending':
+            Order.expire_old_orders(conn)
+            order = Order.get_by_order_id(conn, order_id)
+            payment_status = order.get('payment_status', 'pending')
+            status = order.get('status', 'pending')
 
     current_balance = User.get_balance(conn, user_id)
     response = {
@@ -223,27 +235,8 @@ def api_payment_status(order_id):
     if status == 'awaiting_balance':
         response['message'] = '充值已到账，但账户余额仍不足，请补足后继续任务'
 
-    if status == 'completed' and order.get('rewritten_text'):
-        from app.helpers import derive_risk_level
-        original_score = order.get('original_score', 0) or 0
-        rewritten_score = order.get('rewritten_score', 0) or 0
-        response.update({
-            "success": True,
-            "original": {
-                "text": order['original_text'],
-                "ai_score": round(original_score, 1),
-                "risk_level": derive_risk_level(original_score)
-            },
-            "rewritten": {
-                "text": order['rewritten_text'],
-                "ai_score": round(rewritten_score, 1),
-                "risk_level": derive_risk_level(rewritten_score) if order['rewritten_text'] else 'unknown'
-            },
-            "improvement": round((order.get('original_score', 0) or 0) - (order.get('rewritten_score', 0) or 0), 1),
-            "original_format": order.get('original_format', 'txt'),
-            "original_filename": order.get('original_filename')
-        })
-
+    # 注：改写结果已迁移到 /api/rewrite-progress（stage=done 时返回 result 字段），
+    # 本接口只负责支付状态，不再返回改写结果。
     return jsonify(response)
 
 
@@ -270,8 +263,11 @@ def api_webhook_alipay():
     if not order:
         return "fail", 200
 
-    if order.get('payment_status') != 'pending':
+    payment_status = order.get('payment_status')
+    if payment_status == 'paid':
         return "success", 200
+    if payment_status not in ('pending', 'expired'):
+        return "fail", 200
 
     if amount and abs(round(amount * 100) - round((order.get('price') or 0) * 100)) > 1:
         return "fail", 200
@@ -286,7 +282,9 @@ def api_webhook_alipay():
             return "fail", 200
 
     try:
-        process_payment_success(order_id, trade_no)
+        processed = process_payment_success(order_id, trade_no, amount)
+        if not processed:
+            return "fail", 200
     except Exception:
         logging.exception(f"Payment processing failed for order {order_id}")
         return "fail", 200
@@ -317,7 +315,7 @@ def api_test_mock_payment(order_id):
 
     trade_no = f"MOCK_TRADE_{order_id}"
     try:
-        process_payment_success(order_id, trade_no)
+        process_payment_success(order_id, trade_no, order.get('price'))
         return jsonify({"success": True, "message": "支付模拟成功，正在后台改写...", "order_id": order_id})
     except Exception:
         logging.exception("Mock payment processing failed")

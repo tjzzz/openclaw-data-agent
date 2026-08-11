@@ -4,7 +4,6 @@ Sub-modules:
     - db:               database connection & order-id generation
     - auth_helpers:     login decorator
     - analysis_helpers: AI-analysis result helpers (risk level / suggestions)
-    - text_extract:     file parsing into paragraph dicts
     - file_output:      downloadable file generation
     - tasks:            background payment & rewrite orchestration
     - segmenter:        paragraph segmentation / structure protection
@@ -16,12 +15,6 @@ using ``from app.helpers import X`` keep working unchanged.
 from app.helpers.db import generate_order_id, get_db, close_db
 from app.helpers.auth_helpers import login_required
 from app.helpers.analysis_helpers import derive_risk_level
-from app.helpers.text_extract import (
-    extract_text,
-    extract_text_from_docx,
-    extract_text_from_pdf,
-    paragraph_list_to_text,
-)
 from app.helpers.file_output import generate_docx, generate_file_response
 from app.helpers.tasks import (
     do_background_rewrite,
@@ -37,10 +30,6 @@ __all__ = [
     "close_db",
     "login_required",
     "derive_risk_level",
-    "extract_text",
-    "extract_text_from_docx",
-    "extract_text_from_pdf",
-    "paragraph_list_to_text",
     "generate_docx",
     "generate_file_response",
     "do_background_rewrite",

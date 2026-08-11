@@ -206,42 +206,164 @@ function scrollToResults() {
 }
 
 /* ========== LOADING ========== */
+// 改写流程步骤定义（与 index.html #loading-steps 的 data-step 对应）
+const LOADING_STEPS = ['parse', 'detect', 'rewrite', 'detect_again'];
+// 每个步骤在等待期间的展示时长（ms）——用于在没有后端进度推送时按节奏推进
+const LOADING_STEP_DURATION = 2000;
+let _loadingStepsTimer = null;
+
 function showLoading() {
     document.getElementById('loading-section').style.display = 'block';
     document.getElementById('rewrite-section').style.display = 'none';
-
-    // Animate loading steps
-    let step = 1;
-    const totalSteps = 4;
-    const interval = setInterval(() => {
-        document.getElementById(`step-${step}`).classList.add('completed');
-        step++;
-        if (step <= totalSteps) {
-            document.getElementById(`step-${step}`).classList.add('active');
-        }
-        if (step > totalSteps) clearInterval(interval);
-    }, 600);
-
-    window.loadingInterval = interval;
-    document.getElementById('step-1').classList.add('active');
+    resetLoadingSteps();
+    // 自动滚动到加载区域，避免用户停留在上传区看不到进度
+    const ls = document.getElementById('loading-section');
+    if (ls && typeof ls.scrollIntoView === 'function') {
+        ls.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
 }
 
 function hideLoading() {
+    stopLoadingSteps();
     document.getElementById('loading-section').style.display = 'none';
-    if (window.loadingInterval) clearInterval(window.loadingInterval);
-    // Reset steps
-    for (let i = 1; i <= 4; i++) {
-        const el = document.getElementById(`step-${i}`);
-        el.classList.remove('active', 'completed');
+}
+
+function resetLoadingSteps() {
+    // 重置所有步骤为"待执行"状态，并高亮第一步
+    const stepsEl = document.getElementById('loading-steps');
+    if (stepsEl) {
+        stepsEl.querySelectorAll('.loading-step').forEach(li => {
+            li.classList.remove('active', 'done');
+        });
+    }
+    setLoadingStep(LOADING_STEPS[0]);
+}
+
+/**
+ * 启动按节奏自动推进步骤的定时器（无后端推送时的兜底方案）。
+ * 依次高亮 parse → detect → rewrite → detect_again，最后一步停留直到请求返回。
+ * 返回一个 stop 清理函数；hideLoading 或请求返回时调用。
+ */
+function startLoadingSteps() {
+    stopLoadingSteps();
+    let idx = 0;
+    resetLoadingSteps();
+    _loadingStepsTimer = setInterval(() => {
+        idx += 1;
+        if (idx < LOADING_STEPS.length) {
+            setLoadingStep(LOADING_STEPS[idx]);
+        }
+        // 到最后一站（detect_again）后不再推进，保持该步骤高亮
+    }, LOADING_STEP_DURATION);
+    return stopLoadingSteps;
+}
+
+function stopLoadingSteps() {
+    if (_loadingStepsTimer) {
+        clearInterval(_loadingStepsTimer);
+        _loadingStepsTimer = null;
+    }
+}
+
+/**
+ * 标记某个步骤的状态。
+ * @param {string} step - 步骤标识：parse | detect | rewrite | detect_again
+ * @param {string} [status] - active（进行中，默认）| done（已完成）
+ */
+function setLoadingStep(step, status = 'active') {
+    const stepsEl = document.getElementById('loading-steps');
+    if (!stepsEl) return;
+    const li = stepsEl.querySelector(`.loading-step[data-step="${step}"]`);
+    if (!li) return;
+
+    if (status === 'done') {
+        li.classList.remove('active');
+        li.classList.add('done');
+    } else {
+        // 激活当前步骤；同一步之前的步骤也标记为 done（按顺序推进）
+        const items = Array.from(stepsEl.querySelectorAll('.loading-step'));
+        let reached = false;
+        items.forEach(it => {
+            if (it === li) {
+                reached = true;
+                it.classList.add('active');
+                it.classList.remove('done');
+            } else if (!reached) {
+                it.classList.add('done');
+                it.classList.remove('active');
+            } else {
+                it.classList.remove('active', 'done');
+            }
+        });
     }
 }
 
 /* ========== COPY ========== */
 function copyResult() {
-    const text = document.getElementById('rewrite-new-text').textContent;
-    navigator.clipboard.writeText(text).then(() => {
+    navigator.clipboard.writeText(_rewriteNewText).then(() => {
         showToast('已复制到剪贴板', 'success');
     });
+}
+
+async function downloadOrderFile(orderId, format = 'txt') {
+    const url = `/api/download/${encodeURIComponent(orderId)}?format=${encodeURIComponent(format)}`;
+    const deadline = Date.now() + 60 * 1000;
+    let waitingShown = false;
+
+    while (Date.now() < deadline) {
+        const response = await fetch(url, { credentials: 'same-origin' });
+        if (response.status === 202) {
+            if (!waitingShown) {
+                showToast('Word 文档正在生成，完成后将自动下载', 'info');
+                waitingShown = true;
+            }
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            continue;
+        }
+        if (!response.ok) {
+            let message = '下载失败，请稍后重试';
+            try {
+                const data = await response.json();
+                if (data.error) message = data.error;
+            } catch (err) { /* response was not JSON */ }
+            throw new Error(message);
+        }
+
+        const blob = await response.blob();
+        const disposition = response.headers.get('Content-Disposition') || '';
+        const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+        const plainMatch = disposition.match(/filename="?([^";]+)"?/i);
+        const filename = utf8Match
+            ? decodeURIComponent(utf8Match[1])
+            : (plainMatch ? plainMatch[1] : `humanized.${format}`);
+        const blobUrl = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = blobUrl;
+        anchor.download = filename;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(blobUrl);
+        return;
+    }
+    throw new Error('文档生成时间较长，请稍后重试下载');
+}
+
+async function runDownloadWithButton(button, action) {
+    if (button?.disabled) return;
+    const originalText = button?.textContent;
+    if (button) {
+        button.disabled = true;
+        button.textContent = '正在准备...';
+    }
+    try {
+        await action();
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.textContent = originalText;
+        }
+    }
 }
 
 /* ========== ANIMATE COUNTER ========== */

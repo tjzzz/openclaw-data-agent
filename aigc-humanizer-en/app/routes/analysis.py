@@ -1,13 +1,22 @@
-"""
-Analysis routes — text analysis, suggestion details, and preview rewrite.
+"""AI 率检测路由。
+
+文件上传后先通过 extract_text 提取结构化节点，再由
+paragraph_list_to_text 将所有带 text 字段的节点拼成纯文本。因此，原文 AI
+率检测会分析标题、正文、参考文献、代码块和短段落等全部已提取文本；表格
+占位、图片本身等不含 text 字段的节点不参与检测。
+
+结构化节点会另外保存在 session 中，仅供用户确认改写后进行 segment 分块、
+结构保护和原文格式回填；首次 AI 率检测不会经过 segmenter。
 """
 
 import uuid
 import os
 import logging
+import shutil
 from flask import Blueprint, request, jsonify, session
 from app.extensions import limiter
-from app.helpers import login_required, extract_text, paragraph_list_to_text
+from app.helpers import login_required
+from app.text_extract import extract_text, paragraph_list_to_text
 from config import ALLOWED_UPLOAD_MIMETYPES, PRICE_PER_1000_WORDS, DELETE_UPLOADED_FILE
 
 analysis_bp = Blueprint('analysis', __name__)
@@ -27,6 +36,7 @@ def api_analyze():
     filename = None
     original_format = 'txt'
     original_filename = None
+    source_file_key = None
     from flask import current_app
     app = current_app
 
@@ -49,6 +59,12 @@ def api_analyze():
             try:
                 paragraphs = extract_text(filepath)
                 text = paragraph_list_to_text(paragraphs)
+                if ext == '.docx':
+                    source_file_key = filename
+                    shutil.copy2(
+                        filepath,
+                        os.path.join(app.config['SOURCE_DOCS_FOLDER'], source_file_key)
+                    )
             except Exception:
                 logging.exception(f"Failed to extract text from {filepath}")
                 return jsonify({"error": "文件解析失败，请确认文件格式正确"}), 400
@@ -71,6 +87,7 @@ def api_analyze():
     # Store original format info in session
     session['last_original_format'] = original_format
     session['last_original_filename'] = original_filename
+    session['last_source_file_key'] = source_file_key
     session['last_text'] = text
     # 段落结构（含 style），供改写阶段判断标题/短段用；无样式信息时为 None
     session['last_paragraphs'] = paragraphs
@@ -86,12 +103,15 @@ def api_analyze():
     # Run AI detection (整篇 AI 率检测；段落/维度分析已移除，供改写对比使用)
     from app.extensions import ai_detector
     try:
-        full_analysis = ai_detector(text)
+        full_analysis = ai_detector(text, stage="analyze")
     except Exception:
         logging.exception("AI analysis failed")
         return jsonify({"error": "分析出错，请稍后重试"}), 500
 
     session['last_text'] = text
+    # D 方案：缓存原文检测，供 /api/rewrite 复用（省 1 次 sapling 调用）
+    from app.helpers.tasks import cache_original_analysis
+    cache_original_analysis(text, full_analysis)
 
     return jsonify({
         "success": True,

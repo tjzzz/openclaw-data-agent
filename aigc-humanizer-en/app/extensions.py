@@ -12,6 +12,7 @@ from flask_wtf.csrf import CSRFProtect
 csrf = CSRFProtect()
 limiter = Limiter(key_func=get_remote_address, default_limits=[], storage_uri="memory://")
 rewrite_executor = ThreadPoolExecutor(max_workers=5)
+document_executor = ThreadPoolExecutor(max_workers=2)
 
 # Adapters — set during create_app()
 payment_adapter = None

@@ -628,12 +628,19 @@ def create_payment_adapter(config=None):
     adapter_type = config.get("PAYMENT_ADAPTER", "mock")
 
     if adapter_type == "alipay":
-        # Validate required config
-        if not config.get("ALIPAY_APP_ID"):
-            logger.warning("ALIPAY_APP_ID not set, falling back to mock adapter")
-            return MockPaymentAdapter()
+        required_config = {
+            "ALIPAY_APP_ID": config.get("ALIPAY_APP_ID"),
+            "ALIPAY_PRIVATE_KEY": config.get("ALIPAY_PRIVATE_KEY"),
+            "ALIPAY_PUBLIC_KEY": config.get("ALIPAY_PUBLIC_KEY"),
+        }
+        missing = [name for name, value in required_config.items() if not value]
+        if missing:
+            raise RuntimeError(
+                "PAYMENT_ADAPTER=alipay requires configuration: "
+                + ", ".join(missing)
+            )
 
-        return AlipayPaymentAdapter(
+        adapter = AlipayPaymentAdapter(
             app_id=config["ALIPAY_APP_ID"],
             pid=config.get("ALIPAY_PID", ""),
             private_key=config.get("ALIPAY_PRIVATE_KEY", ""),
@@ -642,5 +649,11 @@ def create_payment_adapter(config=None):
             notify_url=config.get("ALIPAY_NOTIFY_URL"),
             return_url=config.get("ALIPAY_RETURN_URL")
         )
+        if not adapter._sdk_available:
+            raise RuntimeError(
+                "PAYMENT_ADAPTER=alipay could not initialize the Alipay SDK; "
+                "check the SDK installation and Alipay key configuration"
+            )
+        return adapter
     else:
         return MockPaymentAdapter()
