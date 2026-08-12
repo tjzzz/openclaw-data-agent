@@ -7,7 +7,8 @@
 | 功能 | 详情 |
 |------|------|
 | AI 文本检测 | 支持规则检测、Sapling、Originality 及 Mock 适配器 |
-| 降 AI 改写 | 支持 low / median / high 三种聚合粒度，保护标题、参考文献等结构化内容 |
+| 降 AI 改写 | 支持 DeepSeek/OpenCode、付费 API 与本地规则，提供 low / median / high 三种聚合粒度 |
+| 主备容灾 | 主改写服务失败后自动切换备用服务，公共切块与进程级限流保护上游 API |
 | 异步处理 | 后台执行改写与复检，前端展示真实处理进度 |
 | 多格式支持 | 上传 `.docx`、`.pdf`、`.txt`、`.md`，按文件类型生成下载结果 |
 | Word 格式回填 | 基于原文副本和 `node_id` 定位替换正文，尽量保留原始样式 |
@@ -46,8 +47,20 @@ cp config.example.py config.py
 推荐适配器配置：
 
 - 本地开发：`AI_DETECTOR_ADAPTER='rule_based'`、`HUMANIZER_ADAPTER='rule_based'`、`PAYMENT_ADAPTER='mock'`
-- 流程测试：使用 `sapling_mock`、`rule_based_mock` 或 `api_mock`
-- 线上生产：`AI_DETECTOR_ADAPTER='sapling'`、`HUMANIZER_ADAPTER='api'`、`PAYMENT_ADAPTER='alipay'`
+- 流程测试：使用 `sapling_mock`、`rule_based_mock` 或 `ai_text_humanizer_mock`
+- 线上生产：`AI_DETECTOR_ADAPTER='sapling'`、`HUMANIZER_ADAPTER='ai_text_humanizer'`（付费服务）或 `llm_based`（OpenCode/DeepSeek）、`PAYMENT_ADAPTER='alipay'`
+
+大模型作为主服务、付费 API 作为备用服务的示例：
+
+```python
+HUMANIZER_ADAPTER = 'llm_based'
+HUMANIZER_FALLBACK_ADAPTER = 'ai_text_humanizer'
+LLM_PROVIDER = 'deepseek'  # deepseek | opencode
+LLM_API_KEY = 'your-api-key'
+LLM_MODEL = ''             # 留空时使用 Provider 默认模型
+```
+
+生产环境还需设置 `PAYMENT_ADAPTER='alipay'`、`ALLOW_MOCK_PAYMENT=False`。文档正文会发送给所选改写供应商处理，部署前应核对供应商的数据使用和保留政策。
 
 `config.py` 包含密钥且已加入 `.gitignore`，不要提交到代码仓库。
 
@@ -78,9 +91,10 @@ python3 app.py
 ### 改写效果与检测成本
 
 - [ ] **P0 - 高 AI 率自动定向二次改写**：改写结果不达标时，自动定位并二次改写高风险内容；成本控制方案见[技术方案](docs/技术方案.md#111-p0-高-ai-率自动定向二次改写)。
-- [ ] **P0 - 改写上游故障兜底与告警**：主改写 API 超时、断连或熔断后自动切换独立备用改写服务；主备均失败时进入延迟重试队列。熔断时发送飞书个人消息，主备全部失败时电话加急，恢复后发送恢复通知，前端不暴露供应商故障信息。
-- [ ] **P1 - 超长单句处理**：支持单句超过改写 API 单次 2000 词上限的场景。
-- [ ] **P1 - 改写 API 全局频控**：增加跨订单、跨线程的账号级限流，避免业务量增长后超过外部 API 限制。
+- [x] **P0 - 改写上游自动兜底**：主改写 API 失败后自动切换独立备用服务，前端不暴露供应商故障信息。
+- [ ] **P1 - 改写故障告警**：主服务切换、主备全部失败及服务恢复时发送飞书通知；主备全部失败时增加电话加急。
+- [x] **P1 - 超长单句处理**：单句超过上游词数限制时按词安全切块。
+- [x] **P1 - 改写 API 进程级全局频控**：限制当前进程内跨订单、跨线程的最大并发数和请求启动间隔；多 worker 部署后迁移到 Redis 分布式限流。
 - [ ] **P2 - 选择性改写**：支持只改写用户选中的段落。
 
 ### 文档解析与格式还原
@@ -92,17 +106,17 @@ python3 app.py
 ### 稳定性与性能
 
 - [ ] **P1 - 生产多 worker 适配**：将改写进度和原文检测缓存完整迁移到数据库或 Redis。
-- [ ] **P1 - 前端轮询串行化**：避免慢请求下 `setInterval(async ...)` 产生并发进度查询。
+- [x] **P1 - 前端轮询串行化**：改写进度与支付状态均改为串行 `setTimeout` 轮询，避免慢请求叠加。
 - [ ] **P2 - 数据库索引**：为 `user_id`、`order_id`、`payment_status` 等高频查询字段增加索引。
 - [ ] **P2 - 监控与可观测性**：增强健康检查、结构化日志，并评估接入 Sentry。
 
 ### 支付与资金一致性
 
-- [ ] **P0 - 已付款待补余额订单恢复**：为 `paid + awaiting_balance` 建立幂等恢复入口，在用户后续充值或兑换后自动重新扣费并启动原订单。
-- [ ] **P1 - 主动查询支付校验收口**：Webhook 和主动查询统一使用支付确认服务；主动查询必须取得真实 `trade_no`，并统一校验金额、订单号和交易号归属。
-- [ ] **P1 - 支付后任务可靠投递**：支付事务提交后若改写线程提交失败，订单应进入可自动恢复状态，并由周期任务重新投递，不能依赖服务重启。
+- [x] **P0 - 已付款待补余额订单恢复**：为 `paid + awaiting_balance` 建立幂等恢复入口，在用户后续充值、兑换或服务启动时自动重新扣费并启动原订单。
+- [x] **P1 - 主动查询支付校验收口**：Webhook 和主动查询统一调用支付确认服务；主动查询必须取得真实订单号、`trade_no` 和金额，并统一校验金额与交易号归属。
+- [x] **P1 - 支付后任务可靠投递**：支付事务提交后若线程池暂时拒绝任务，订单保留 `processing` 状态并延迟重投，服务启动时继续恢复。
 - [ ] **P1 - 支付轮询与限流协调**：降低前端查询频率或提高 `/api/payment-status` 限额，避免 3 秒轮询紧贴 `20/min` 上限导致 429 后停止查询。
-- [ ] **P1 - 支付适配器严格校验**：只接受明确的 `mock/alipay` 配置，未知值启动失败；生产环境禁止依赖 `FLASK_ENV` 判断是否允许 Mock。
+- [x] **P1 - 支付适配器严格校验**：只接受明确的 `mock/alipay` 配置，未知值启动失败；通过显式 `ALLOW_MOCK_PAYMENT` 控制测试模式，不再依赖 `FLASK_ENV`。
 - [ ] **P2 - 未支付订单复用与关闭**：刷新二维码或切换充值档位时复用或关闭旧订单，减少无效 `pending/expired` 记录。
 
 ### 产品能力

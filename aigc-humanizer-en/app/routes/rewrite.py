@@ -110,9 +110,8 @@ def api_rewrite():
         )
 
         # 提交后台改写线程（复用支付后改写的 do_background_rewrite，含进度写入）
-        from app.extensions import rewrite_executor
-        from app.helpers.tasks import do_background_rewrite
-        rewrite_executor.submit(do_background_rewrite, order_id, text, mode, paragraphs)
+        from app.helpers.tasks import submit_rewrite_task
+        submit_rewrite_task(order_id, text, mode, paragraphs)
 
         return jsonify({
             "success": True,
@@ -123,7 +122,7 @@ def api_rewrite():
         })
 
     except Exception:
-        # 建单/提交线程失败时回滚扣费
+        # 只有建单失败才回滚扣费；提交失败由 processing 订单自动重投。
         if balance_deducted:
             try:
                 conn = get_db()

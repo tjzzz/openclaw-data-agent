@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Huma - AI辅助英文写作，让论文更自然</title>
+    <title>Huma - AI辅助英文写作，让内容更自然</title>
     <meta name="description" content="Huma 是一款英文 AI 检测与降 AI 率工具，帮助留学生检测论文 AI 率并改写润色，轻松通过 Turnitin、GPTZero 等检测。免费试用 200 词。">
     <meta name="keywords" content="AI检测,降AI率,论文改写,Turnitin检测,英文润色,AI Humanizer,学术写作">
     <meta name="robots" content="index, follow">
@@ -11,7 +11,7 @@
     <link rel="canonical" href="https://{{ request.host }}/">
 
     <!-- Open Graph -->
-    <meta property="og:title" content="Huma - AI辅助英文写作，让论文更自然">
+    <meta property="og:title" content="Huma - AI辅助英文写作，让内容更自然">
     <meta property="og:description" content="检测论文 AI 率并精准改写，轻松通过 Turnitin、GPTZero。免费试用 200 词。">
     <meta property="og:url" content="https://ipengai.cn/">
     <meta property="og:type" content="website">
@@ -19,12 +19,12 @@
 
     <!-- Twitter Card -->
     <meta name="twitter:card" content="summary">
-    <meta name="twitter:title" content="Huma - AI辅助英文写作，让论文更自然">
+    <meta name="twitter:title" content="Huma - AI辅助英文写作，让内容更自然">
     <meta name="twitter:description" content="检测论文 AI 率并精准改写，轻松通过 Turnitin、GPTZero。">
 
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%234f46e5'/%3E%3Ctext x='16' y='22' font-family='Inter,sans-serif' font-weight='800' font-size='18' fill='white' text-anchor='middle'%3EH%3C/text%3E%3C/svg%3E">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v='20260812-4') }}">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <!-- Baidu Tongji -->
@@ -65,7 +65,7 @@
                 <span class="menu-bar"></span>
             </button>
             <div class="nav-links">
-                <a href="#features" class="nav-link">功能</a>
+                <a href="#features" class="nav-link">介绍</a>
                 <a href="#pricing" class="nav-link">定价</a>
                 <a href="#faq" class="nav-link">常见问题</a>
                 <!-- Auth-dependent elements -->
@@ -87,9 +87,10 @@
                     <div class="hero-mono">
                         <span class="huma-h">H</span><span class="huma-uma">uma</span>
                     </div>
-                    <div class="hero-tagline">让论文更自然，轻松通过检测</div>
+                    <div class="hero-tagline">让内容更自然，轻松通过检测</div>
                     <p class="hero-subtitle">
-                        上传英文论文或粘贴文字，一键检测 AI 率。精准改写、保留原意，<br>
+                        上传英文文件或粘贴文字，一键改写。支持标准、快速、精细三种不同模式。<br>
+                        精准改写、保留原意，
                         轻松通过 Turnitin、GPTZero 等主流检测平台。
                     </p>
                 </div>
@@ -129,7 +130,7 @@
                                     <button type="button" class="mode-dd-option" data-mode="high">快速模式（大段聚合）</button>
                                 </div>
                             </div>
-                            <p class="upload-note">粘贴文本或上传文档，自动检测 AI 率并改写降 AIGC，保留原意与格式。</p>
+                            <p class="upload-note">下拉可选择不同改写模式</p>
                         </div>
                     </form>
                 </div>
@@ -400,12 +401,17 @@
                 <div class="feature-card">
                     <div class="feature-icon">🔒</div>
                     <h4>安全可靠</h4>
-                    <p>SSL 加密传输，文档仅用于处理，不用于模型训练或泄露</p>
+                    <p>SSL 加密传输，文档仅用于完成本次检测与改写请求</p>
                 </div>
                 <div class="feature-card">
                     <div class="feature-icon">⚡</div>
                     <h4>快至 2 分钟</h4>
-                    <p>智能改写引擎，保留学术严谨性同时大幅降低 AI 检测率</p>
+                    <p>智能改写引擎尽量保留原意、引用与专业术语，实际检测结果以目标平台为准</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📄</div>
+                    <h4>多文件类型支持</h4>
+                    <p>支持 Word、PDF、TXT 和 Markdown，Word 文档可尽量保留原有结构与格式</p>
                 </div>
             </div>
         </div>
@@ -469,58 +475,33 @@
             <h2 class="section-heading">常见 <span class="gradient-text">问题</span></h2>
             <div class="faq-list">
                 <div class="faq-item">
-                    <button class="faq-question">
-                        <span>Huma 检测准确率高吗？</span>
-                        <svg class="faq-arrow" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="6 9 12 15 18 9"/>
-                        </svg>
-                    </button>
+                    <button class="faq-question"><span>Huma 检测准确率高吗？</span><span class="faq-arrow" aria-hidden="true">⌄</span></button>
                     <div class="faq-answer">
-                        <p>Huma 采用与 Turnitin 类似的检测算法，综合评估文本的困惑度、突发性、AI 模式识别等多个维度。我们的模型经过优化校准，超过 10 万篇测试文本验证，检测准确率在 85% 以上。但请注意，任何工具都无法 100% 替代官方检测平台的判定结果。</p>
+                        <p>Huma 会综合分析文本中的多项写作特征，用于改写前后的风险参考和重点段落定位。不同检测平台的模型与阈值并不相同，因此结果不能替代 Turnitin、GPTZero 等目标平台的官方判定。</p>
                     </div>
                 </div>
                 <div class="faq-item">
-                    <button class="faq-question">
-                        <span>修改后会影响原文意思吗？</span>
-                        <svg class="faq-arrow" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="6 9 12 15 18 9"/>
-                        </svg>
-                    </button>
+                    <button class="faq-question"><span>修改后会影响原文意思吗？</span><span class="faq-arrow" aria-hidden="true">⌄</span></button>
                     <div class="faq-answer">
                         <p>不会。我们的改写引擎专注于降低 AI 写作特征——替换 AI 常用短语、增加句式变化、优化词汇多样性。学术术语、专业名词、数据引用等核心内容都会被保留。每次改写后你可以复查对比原文和改写结果。</p>
                     </div>
                 </div>
                 <div class="faq-item">
-                    <button class="faq-question">
-                        <span>支付后不满意怎么办？</span>
-                        <svg class="faq-arrow" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="6 9 12 15 18 9"/>
-                        </svg>
-                    </button>
+                    <button class="faq-question"><span>支付后不满意怎么办？</span><span class="faq-arrow" aria-hidden="true">⌄</span></button>
                     <div class="faq-answer">
                         <p>如果使用主流检测平台验证后 AI 率未显著降低，请联系客服处理。</p>
                     </div>
                 </div>
                 <div class="faq-item">
-                    <button class="faq-question">
-                        <span>支持哪些文件格式？</span>
-                        <svg class="faq-arrow" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="6 9 12 15 18 9"/>
-                        </svg>
-                    </button>
+                    <button class="faq-question"><span>支持哪些文件格式？</span><span class="faq-arrow" aria-hidden="true">⌄</span></button>
                     <div class="faq-answer">
                         <p>支持上传 .docx（Word）、.pdf、.txt 和 .md（Markdown）格式文件，同时支持直接粘贴英文文本。单个文件最大 20MB。建议使用 .docx 格式以获得最佳兼容性。</p>
                     </div>
                 </div>
                 <div class="faq-item">
-                    <button class="faq-question">
-                        <span>我的文档隐私安全吗？</span>
-                        <svg class="faq-arrow" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="6 9 12 15 18 9"/>
-                        </svg>
-                    </button>
+                    <button class="faq-question"><span>我的文档隐私安全吗？</span><span class="faq-arrow" aria-hidden="true">⌄</span></button>
                     <div class="faq-answer">
-                        <p>是的。所有传输采用 SSL 加密，文档仅用于处理当前请求，处理完成后自动删除。我们不会将你的文档用于模型训练或任何其他用途。文档在我们服务器上的保留时间不超过 24 小时。</p>
+                        <p>所有传输采用 SSL 加密，文档仅用于完成当前检测与改写请求。改写时正文会发送给当前配置的第三方处理服务，具体数据政策以对应服务商条款为准；上传的临时文件会按系统清理策略删除。</p>
                     </div>
                 </div>
             </div>
@@ -533,11 +514,11 @@
             <div class="footer-content">
                 <div class="footer-brand">
                     <span class="logo-word" style="font-size:1.2rem;font-weight:700;">Huma</span>
-                    <p>降低 AI 检测率，让论文更自然</p>
+                    <p>降低 AI 检测率，让内容更自然</p>
                 </div>
                 <div class="footer-links">
                     <h5>产品</h5>
-                    <a href="#features">功能</a>
+                    <a href="#features">介绍</a>
                     <a href="#pricing">定价</a>
                     <a href="#faq">常见问题</a>
                 </div>

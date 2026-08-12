@@ -560,8 +560,9 @@ class AlipayPaymentAdapter(PaymentAdapter):
 
             if response_code == "10000":
                 trade_status = alipay_trade_query_response.get("trade_status", "UNKNOWN")
+                returned_order_id = alipay_trade_query_response.get("out_trade_no")
                 return {
-                    "order_id": order_id,
+                    "order_id": returned_order_id,
                     "trade_no": alipay_trade_query_response.get("trade_no"),
                     "trade_status": trade_status,
                     "total_amount": float(alipay_trade_query_response.get("total_amount", 0)),
@@ -655,5 +656,8 @@ def create_payment_adapter(config=None):
                 "check the SDK installation and Alipay key configuration"
             )
         return adapter
-    else:
+    if adapter_type == "mock":
         return MockPaymentAdapter()
+    raise ValueError(
+        f"Unknown PAYMENT_ADAPTER: {adapter_type}; expected 'mock' or 'alipay'"
+    )

@@ -78,8 +78,9 @@ function closePaymentModal() {
         document.body.style.overflow = '';
 
         // Clear polling timer to prevent leaks
+        pollToken++;
         if (pollInterval) {
-            clearInterval(pollInterval);
+            clearTimeout(pollInterval);
             pollInterval = null;
         }
 
@@ -324,21 +325,25 @@ async function refreshQRCode() {
 
 /* ========== PAYMENT POLLING ========== */
 let pollInterval = null;
+let pollToken = 0;
 let pollCount = 0;
 const MAX_POLL_COUNT = 600; // ★ P5: 30 minutes (原200=10分钟，但后台改写可能排队)
 const POLL_INTERVAL_MS = 3000;
 
 function startPaymentPolling(orderId) {
+    const currentPollToken = ++pollToken;
     // Clear any existing polling
     if (pollInterval) {
-        clearInterval(pollInterval);
-        }
-        pollCount = 0;
+        clearTimeout(pollInterval);
+        pollInterval = null;
+    }
+    pollCount = 0;
 
         // 倒计时初始值（与支付宝 timeout_express 一致）
         const TOTAL_TIMEOUT = 600; // 10 minutes in seconds
 
-        pollInterval = setInterval(async () => {
+        const pollOnce = async () => {
+            if (currentPollToken !== pollToken) return;
             pollCount++;
 
             // 更新倒计时
@@ -348,7 +353,8 @@ function startPaymentPolling(orderId) {
             document.getElementById('poll-status').innerHTML = `⏳ 等待支付中 ${mm}:${ss}`;
 
             if (pollCount > MAX_POLL_COUNT) {
-            clearInterval(pollInterval);
+            pollToken++;
+            pollInterval = null;
             document.getElementById('poll-status').innerHTML = '⏰ 支付超时，请联系客服';
             return;
         }
@@ -363,7 +369,7 @@ function startPaymentPolling(orderId) {
                 } catch (_) {
                     // 非 JSON 错误响应使用通用提示。
                 }
-                clearInterval(pollInterval);
+                pollToken++;
                 pollInterval = null;
                 document.getElementById('poll-status').textContent = '❌ ' + message;
                 showToast(message, 'error');
@@ -373,13 +379,15 @@ function startPaymentPolling(orderId) {
 
             if (data.error) {
                 // Order not found or access denied — stop polling
-                clearInterval(pollInterval);
+                pollToken++;
+                pollInterval = null;
                 document.getElementById('poll-status').innerHTML = '❌ ' + data.error;
                 return;
             }
 
             if (data.status === 'awaiting_balance') {
-                clearInterval(pollInterval);
+                pollToken++;
+                pollInterval = null;
                 document.getElementById('poll-status').innerHTML = '⚠️ ' + (data.message || '余额仍不足');
                 if (typeof updateNavBalance === 'function' && data.balance_after !== null) {
                     updateNavBalance(data.balance_after);
@@ -390,7 +398,6 @@ function startPaymentPolling(orderId) {
             if (data.payment_status === 'paid' || data.status === 'processing') {
                 // 充值成功，进入改写阶段：切换到主页面真实进度页，而不是停在充值弹窗
                 document.getElementById('poll-status').innerHTML = '✅ 充值成功，正在改写...';
-                clearInterval(pollInterval);
                 pollInterval = null;
                 closePaymentModal();
                 startBalanceRewritePolling(orderId, data.balance_after);
@@ -398,11 +405,13 @@ function startPaymentPolling(orderId) {
             }
 
             if (data.status === 'failed') {
-                clearInterval(pollInterval);
+                pollToken++;
+                pollInterval = null;
                 document.getElementById('poll-status').innerHTML = '❌ 改写失败，请稍后重试';
                 showToast('改写失败，请稍后重试', 'error');
             } else if (data.payment_status === 'expired') {
-                clearInterval(pollInterval);
+                pollToken++;
+                pollInterval = null;
                 document.getElementById('poll-status').innerHTML = '⏰ 订单已超时，请重新检测';
                 showToast('订单已超时', 'error');
             }
@@ -410,7 +419,11 @@ function startPaymentPolling(orderId) {
             // Silently continue polling on error
             console.warn('Payment polling error:', err);
         }
-    }, 3000);
+        if (currentPollToken === pollToken) {
+            pollInterval = setTimeout(pollOnce, POLL_INTERVAL_MS);
+        }
+    };
+    pollOnce();
 }
 
 /* ========== CREATE PAYMENT ORDER ========== */

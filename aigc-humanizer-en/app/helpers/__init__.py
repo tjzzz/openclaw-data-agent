@@ -19,6 +19,8 @@ from app.helpers.file_output import generate_docx, generate_file_response
 from app.helpers.tasks import (
     do_background_rewrite,
     process_payment_success,
+    submit_rewrite_task,
+    recover_awaiting_balance_orders,
     recover_processing_orders,
     rewrite_and_analyze,
     _load_paragraphs,
@@ -34,6 +36,8 @@ __all__ = [
     "generate_file_response",
     "do_background_rewrite",
     "process_payment_success",
+    "submit_rewrite_task",
+    "recover_awaiting_balance_orders",
     "recover_processing_orders",
     "rewrite_and_analyze",
     "_load_paragraphs",

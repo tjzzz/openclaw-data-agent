@@ -29,6 +29,7 @@ def create_app():
         sys.path.insert(0, _root)
 
     from config import PROJ_ROOT, SECRET_KEY, PAYMENT_ADAPTER, HUMANIZER_ADAPTER, AI_DETECTOR_ADAPTER
+    import config as project_config
 
     app = Flask(__name__,
                 root_path=PROJ_ROOT,
@@ -79,7 +80,8 @@ def create_app():
 
     payment_adapter = create_payment_adapter()
     humanizer_adapter = create_humanizer(
-        app.config.get('HUMANIZER_ADAPTER', 'rule_based')
+        app.config.get('HUMANIZER_ADAPTER', 'rule_based'),
+        getattr(project_config, 'HUMANIZER_FALLBACK_ADAPTER', None),
     )
     logging.info("Using %s", type(humanizer_adapter).__name__)
     set_adapters(payment_adapter, humanizer_adapter)
@@ -89,10 +91,11 @@ def create_app():
     set_ai_detector(detect_fn)
 
     # ── Safety check: mock adapter in production ──
-    if app.config.get('PAYMENT_ADAPTER') == 'mock' and os.environ.get('FLASK_ENV') == 'production':
+    allow_mock_payment = getattr(project_config, 'ALLOW_MOCK_PAYMENT', False)
+    if app.config.get('PAYMENT_ADAPTER') == 'mock' and not allow_mock_payment:
         raise RuntimeError(
-            "Refusing to start: PAYMENT_ADAPTER=mock is not allowed in production. "
-            "Set PAYMENT_ADAPTER=alipay and configure Alipay credentials."
+            "Refusing to start with PAYMENT_ADAPTER=mock. "
+            "Set ALLOW_MOCK_PAYMENT=True only in local/test config."
         )
     if app.config.get('PAYMENT_ADAPTER') == 'mock':
         logging.warning("PAYMENT_ADAPTER=mock is enabled. This should only be used for development.")

@@ -198,10 +198,18 @@ def api_payment_status(order_id):
                 f"status={query_result.get('status')}"
             )
             if query_result.get('status') == 'paid':
-                trade_no = query_result.get('trade_no') or f"QUERY_{order_id}"
-                processed = process_payment_success(
-                    order_id, trade_no, query_result.get('total_amount')
-                )
+                queried_order_id = query_result.get('order_id')
+                trade_no = query_result.get('trade_no')
+                amount = query_result.get('total_amount')
+                processed = False
+                if queried_order_id == order_id and trade_no and amount is not None:
+                    processed = process_payment_success(order_id, trade_no, amount)
+                else:
+                    logging.warning(
+                        "Incomplete payment query result for %s: returned_order=%s "
+                        "has_trade_no=%s has_amount=%s",
+                        order_id, queried_order_id, bool(trade_no), amount is not None,
+                    )
                 if not processed:
                     logging.warning("Queried payment failed validation for %s", order_id)
                 # Refresh order from DB to get updated status
@@ -257,29 +265,6 @@ def api_webhook_alipay():
 
     if not is_valid:
         return "fail", 200
-
-    conn = get_db()
-    order = Order.get_by_order_id(conn, order_id)
-    if not order:
-        return "fail", 200
-
-    payment_status = order.get('payment_status')
-    if payment_status == 'paid':
-        return "success", 200
-    if payment_status not in ('pending', 'expired'):
-        return "fail", 200
-
-    if amount and abs(round(amount * 100) - round((order.get('price') or 0) * 100)) > 1:
-        return "fail", 200
-
-    if trade_no:
-        existing = conn.execute(
-            "SELECT order_id FROM orders WHERE alipay_trade_no = ? AND order_id != ?",
-            (trade_no, order_id)
-        ).fetchone()
-        if existing:
-            logging.warning(f"Duplicate trade_no {trade_no} attempted for order {order_id}, already used by {existing['order_id']}")
-            return "fail", 200
 
     try:
         processed = process_payment_success(order_id, trade_no, amount)

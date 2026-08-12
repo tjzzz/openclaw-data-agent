@@ -6,7 +6,7 @@ Users redeem codes purchased from various channels for word credit.
 import logging
 from flask import Blueprint, request, jsonify, session
 from app.extensions import limiter
-from app.helpers import get_db, login_required
+from app.helpers import get_db, login_required, recover_awaiting_balance_orders
 from app.models import ActivationCode, User
 
 activation_bp = Blueprint('activation', __name__)
@@ -38,11 +38,14 @@ def api_redeem_code():
 
     balance = User.get_balance(conn, user_id)
     logging.info(f"[ACTIVATION] User {user_id} redeemed code {code}, new balance={balance}")
+    recovered_orders = recover_awaiting_balance_orders(user_id)
+    balance = User.get_balance(conn, user_id)
 
     return jsonify({
         "success": True,
         "balance": balance,
-        "message": message
+        "message": message,
+        "recovered_order_ids": recovered_orders,
     })
 
 

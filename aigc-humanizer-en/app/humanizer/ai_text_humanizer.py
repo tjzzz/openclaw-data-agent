@@ -11,10 +11,10 @@ from config import AI_TEXT_HUMANIZER_PASSWORD as _CFG_PASSWORD
 
 from app.humanizer.adapter import HumanizerAdapter, _cfg
 
-logger = logging.getLogger("app.humanizer.api")
+logger = logging.getLogger("app.humanizer.ai_text_humanizer")
 
 
-class ApiHumanizer(HumanizerAdapter):
+class AITextHumanizer(HumanizerAdapter):
     """
     API-based humanizer calling ai-text-humanizer.com.
 
@@ -31,8 +31,8 @@ class ApiHumanizer(HumanizerAdapter):
     CIRCUIT_FAILURE_THRESHOLD = 3
     CIRCUIT_COOLDOWN_SECONDS = 60
     ERROR_RESPONSES = {"RESULT_TOO_LONG"}
-    # 日志里的 backend 标识；Mock 子类会覆盖为 "api_mock"
-    backend_label = "api"
+    # 日志里的 backend 标识；Mock 子类会覆盖为专用标识。
+    backend_label = "ai_text_humanizer"
 
     def __init__(self, email=None, password=None):
         """
@@ -51,7 +51,7 @@ class ApiHumanizer(HumanizerAdapter):
         if not self.email or not self.password:
             logger.warning(
                 "AI_TEXT_HUMANIZER_EMAIL/ PASSWORD not configured. "
-                "ApiHumanizer will raise an error if used."
+                "AITextHumanizer will raise an error if used."
             )
 
     def _circuit_is_open(self):
@@ -129,7 +129,7 @@ class ApiHumanizer(HumanizerAdapter):
         # 有段落结构时按 mode 分段改写。
         if paragraphs is not None:
             return self._humanize_segmented_structured(
-                mode, paragraphs, self._process_large_text, progress_cb=progress_cb)
+                mode, paragraphs, self._rewrite_with_api_chunking, progress_cb=progress_cb)
 
         word_count = self._count_words(text)
 
@@ -139,7 +139,7 @@ class ApiHumanizer(HumanizerAdapter):
                 raise RuntimeError(f"API humanize failed: {result}")
             return result, []
         else:
-            return self._process_large_text(text), []
+            return self._rewrite_with_api_chunking(text), []
 
     def _call_api(self, text):
         """
@@ -211,118 +211,18 @@ class ApiHumanizer(HumanizerAdapter):
 
         return False, "Max retries exceeded"
 
-    def _process_large_text(self, text):
-        """
-        Humanize text, splitting into chunks only when necessary.
-
-        Args:
-            text: Full text to humanize.
-
-        Returns:
-            Humanized text string.
-
-        Raises:
-            RuntimeError: If any chunk fails.
-
-        说明：
-            - 本方法也作为 segmented rewrite 的 block_rewriter 回调被调用，
-              此时传入的 block_text 通常已被 segmenter 控制在 MAX_WORDS_PER_REQUEST 内。
-            - 因此先快速判断长度，≤ 上限时直接单次调用，跳过不必要的重新切分扫描。
-        """
-        start = time.time()
-        # 提前判断：文本已在单次上限内则直接调用，避免重复 split/count 扫描
-        if self._count_words(text) <= self.MAX_WORDS_PER_REQUEST:
-            success, result = self._call_api(text)
-            if not success:
-                raise RuntimeError(f"API humanize failed: {result}")
-            logger.info(
-                "rewrite stage=rewrite backend=%s action=done single_chunk=1 words=%d elapsed=%.0fms",
-                self.backend_label, self._count_words(text), (time.time() - start) * 1000,
-            )
-            return result
-
-        chunks = self._split_text_smartly(text)
-        total = len(chunks)
-        logger.info(
-            "rewrite stage=rewrite backend=%s action=chunk_split words=%d chunks=%d",
-            self.backend_label, self._count_words(text), total,
+    def _rewrite_with_api_chunking(self, text):
+        return self._rewrite_with_chunking(
+            text,
+            self._rewrite_api_block,
+            max_words=self.MAX_WORDS_PER_REQUEST,
+            request_delay=self.RATE_LIMIT_DELAY,
+            backend_label=self.backend_label,
+            use_global_limit=True,
         )
 
-        results = []
-        for i, chunk in enumerate(chunks, 1):
-            chunk_words = self._count_words(chunk)
-            logger.info(
-                "rewrite stage=rewrite backend=%s action=chunk_start chunk=%d/%d words=%d",
-                self.backend_label, i, total, chunk_words,
-            )
-
-            success, result = self._call_api(chunk)
-            if not success:
-                raise RuntimeError(f"Chunk {i}/{total} failed: {result}")
-
-            results.append(result)
-
-            if i < total:
-                time.sleep(self.RATE_LIMIT_DELAY)
-
-        logger.info(
-            "rewrite stage=rewrite backend=%s action=done chunks=%d elapsed=%.0fms",
-            self.backend_label, total, (time.time() - start) * 1000,
-        )
-        return "\n\n".join(results)
-
-    def _split_text_smartly(self, text):
-        """
-        Split text into chunks respecting the word limit.
-
-        Args:
-            text: Full text to split.
-
-        Returns:
-            List of text chunks, each within MAX_WORDS_PER_REQUEST.
-        """
-        chunks = []
-        current_chunk = ""
-        current_words = 0
-        paragraphs = text.split('\n\n')
-
-        for para in paragraphs:
-            para_words = self._count_words(para)
-
-            if para_words > self.MAX_WORDS_PER_REQUEST:
-                if current_chunk:
-                    chunks.append(current_chunk.strip())
-                    current_chunk = ""
-                    current_words = 0
-
-                # Split by sentences for oversized paragraphs
-                sentences = para.replace('. ', '. \n').replace('! ', '! \n').replace('? ', '? \n').split('\n')
-                for sentence in sentences:
-                    sentence_words = self._count_words(sentence)
-                    if current_words + sentence_words <= self.MAX_WORDS_PER_REQUEST:
-                        current_chunk += sentence + " "
-                        current_words += sentence_words
-                    else:
-                        if current_chunk:
-                            chunks.append(current_chunk.strip())
-                        current_chunk = sentence + " "
-                        current_words = sentence_words
-            else:
-                if current_words + para_words <= self.MAX_WORDS_PER_REQUEST:
-                    current_chunk += para + "\n\n"
-                    current_words += para_words
-                else:
-                    if current_chunk:
-                        chunks.append(current_chunk.strip())
-                    current_chunk = para + "\n\n"
-                    current_words = para_words
-
-        if current_chunk:
-            chunks.append(current_chunk.strip())
-
-        return chunks
-
-    @staticmethod
-    def _count_words(text):
-        """Count words in text."""
-        return len(text.split())
+    def _rewrite_api_block(self, text):
+        success, result = self._call_api(text)
+        if not success:
+            raise RuntimeError(f"API humanize failed: {result}")
+        return result

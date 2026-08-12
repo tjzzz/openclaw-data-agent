@@ -54,6 +54,9 @@ def get_cached_original_analysis(text):
 _REWRITE_PROGRESS = {}
 _REWRITE_PROGRESS_LOCK = threading.Lock()
 _REWRITE_PROGRESS_TTL_SECONDS = 3600
+_DELIVERY_RETRY_LOCK = threading.Lock()
+_DELIVERY_RETRY_TIMERS = {}
+_DELIVERED_ORDERS = set()
 
 
 def _prune_rewrite_progress(now=None):
@@ -114,6 +117,74 @@ def clear_rewrite_progress(order_id):
     """改写结束后清除进度（避免内存泄漏）。"""
     with _REWRITE_PROGRESS_LOCK:
         _REWRITE_PROGRESS.pop(str(order_id), None)
+
+
+def submit_rewrite_task(order_id, text, mode, paragraphs=None, attempt=1):
+    """可靠提交改写任务；提交失败时保留 processing 状态并延迟重试。"""
+    from app.extensions import rewrite_executor
+    from app.models import Order, get_connection
+
+    conn = get_connection()
+    try:
+        order = Order.get_by_order_id(conn, order_id)
+    finally:
+        conn.close()
+    if not order or order.get('status') != 'processing':
+        logging.info(
+            "Skip rewrite delivery for order=%s status=%s",
+            order_id, order.get('status') if order else 'missing',
+        )
+        with _DELIVERY_RETRY_LOCK:
+            _DELIVERY_RETRY_TIMERS.pop(str(order_id), None)
+        return False
+
+    order_key = str(order_id)
+    with _DELIVERY_RETRY_LOCK:
+        if order_key in _DELIVERED_ORDERS:
+            logging.info("Rewrite task already submitted in this process: %s", order_id)
+            return True
+        _DELIVERED_ORDERS.add(order_key)
+
+    try:
+        rewrite_executor.submit(_run_delivered_rewrite, order_id, text, mode, paragraphs)
+        with _DELIVERY_RETRY_LOCK:
+            _DELIVERY_RETRY_TIMERS.pop(order_key, None)
+        logging.info("Rewrite task submitted: order=%s attempt=%d", order_id, attempt)
+        return True
+    except Exception:
+        with _DELIVERY_RETRY_LOCK:
+            _DELIVERED_ORDERS.discard(order_key)
+        logging.exception(
+            "Rewrite task submission failed: order=%s attempt=%d", order_id, attempt
+        )
+        set_rewrite_progress(order_id, "queued", message="任务排队中，正在自动重试")
+        if attempt == 5:
+            logging.error(
+                "Rewrite task still queued after %d submission attempts: %s",
+                attempt, order_id,
+            )
+
+        delay = min(2 ** attempt, 60)
+        timer = threading.Timer(
+            delay, submit_rewrite_task,
+            args=(order_id, text, mode, paragraphs, attempt + 1),
+        )
+        timer.daemon = True
+        with _DELIVERY_RETRY_LOCK:
+            existing = _DELIVERY_RETRY_TIMERS.get(order_key)
+            if existing and existing.is_alive():
+                return False
+            _DELIVERY_RETRY_TIMERS[order_key] = timer
+        timer.start()
+        return False
+
+
+def _run_delivered_rewrite(order_id, text, mode, paragraphs):
+    try:
+        do_background_rewrite(order_id, text, mode, paragraphs)
+    finally:
+        with _DELIVERY_RETRY_LOCK:
+            _DELIVERED_ORDERS.discard(str(order_id))
 
 
 def rewrite_and_analyze(text, mode=None, paragraphs=None, original_analysis=None,
@@ -250,7 +321,6 @@ def process_payment_success(order_id, trade_no, paid_amount=None):
     Idempotent: skips if order is already in processing/completed/failed state.
     """
     from app.models import Order, User, BalanceTransaction, get_connection
-    from app.extensions import rewrite_executor
 
     # Use a dedicated connection so this function always owns its transaction.
     # The caller connection may have performed reads or writes before invoking us.
@@ -266,17 +336,36 @@ def process_payment_success(order_id, trade_no, paid_amount=None):
         current_payment_status = order.get('payment_status', 'pending')
         if current_payment_status == 'paid':
             tx_conn.rollback()
-            logging.info(
-                f"Order {order_id} already in payment_status={current_payment_status}, "
-                f"skipping duplicate processing"
+            stored_trade_no = order.get('alipay_trade_no')
+            stored_amount = order.get('alipay_amount')
+            same_trade = bool(trade_no and stored_trade_no == trade_no)
+            same_amount = (
+                paid_amount is not None and stored_amount is not None and
+                abs(round(float(paid_amount) * 100) -
+                    round(float(stored_amount) * 100)) <= 1
             )
-            return True
+            if same_trade and same_amount:
+                logging.info("Duplicate payment confirmation accepted for %s", order_id)
+                return True
+            logging.warning(
+                "Conflicting payment confirmation rejected for %s", order_id
+            )
+            return False
         if current_payment_status not in ('pending', 'expired'):
             tx_conn.rollback()
             logging.warning(
                 "Payment confirmation rejected for order %s in status=%s",
                 order_id, current_payment_status,
             )
+            return False
+
+        if not trade_no:
+            tx_conn.rollback()
+            logging.warning("Payment confirmation missing trade_no for order %s", order_id)
+            return False
+        if paid_amount is None:
+            tx_conn.rollback()
+            logging.warning("Payment confirmation missing amount for order %s", order_id)
             return False
 
         if paid_amount is not None:
@@ -364,8 +453,75 @@ def process_payment_success(order_id, trade_no, paid_amount=None):
     paragraphs = _load_paragraphs(order)
 
     # Submit rewrite to thread pool (don't block the webhook response)
-    rewrite_executor.submit(do_background_rewrite, order_id, text, mode, paragraphs)
+    submit_rewrite_task(order_id, text, mode, paragraphs)
+    recover_awaiting_balance_orders(user_id)
     return True
+
+
+def recover_awaiting_balance_orders(user_id):
+    """Charge and resume paid orders once the user's balance is sufficient."""
+    from app.models import User, BalanceTransaction, get_connection
+
+    recovered = []
+    conn = get_connection()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        rows = conn.execute(
+            """SELECT * FROM orders
+               WHERE user_id = ? AND payment_status = 'paid'
+                 AND status = 'awaiting_balance'
+               ORDER BY created_at ASC""",
+            (user_id,),
+        ).fetchall()
+
+        for row in rows:
+            order = dict(row)
+            word_count = int(order.get('word_count') or 0)
+            balance_after = User.deduct_balance(conn, user_id, word_count)
+            if balance_after is None:
+                break
+
+            BalanceTransaction.create(
+                conn, user_id, 'rewrite_consumption', -word_count,
+                balance_after, order_id=order['order_id'],
+                description='补足余额后改写任务扣费',
+            )
+            updated = conn.execute(
+                """UPDATE orders
+                   SET status = 'processing', balance_after = ?
+                   WHERE order_id = ? AND payment_status = 'paid'
+                     AND status = 'awaiting_balance'""",
+                (balance_after, order['order_id']),
+            )
+            if updated.rowcount != 1:
+                raise RuntimeError(
+                    f"Failed to claim awaiting-balance order {order['order_id']}"
+                )
+            recovered.append(order)
+
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        logging.exception(
+            "Failed to recover awaiting-balance orders for user %s", user_id
+        )
+        return []
+    finally:
+        conn.close()
+
+    for order in recovered:
+        mode = order.get('mode') or 'median'
+        if mode not in ('low', 'median', 'high'):
+            mode = 'low' if mode in ('paragraph', 'academic') else 'median'
+        submit_rewrite_task(
+            order['order_id'],
+            order['original_text'],
+            mode,
+            _load_paragraphs(order),
+        )
+        logging.info("Recovered awaiting-balance order %s", order['order_id'])
+
+    return [order['order_id'] for order in recovered]
 
 
 def recover_processing_orders():
@@ -376,22 +532,31 @@ def recover_processing_orders():
     """
     try:
         from app.models import get_connection
-        from app.extensions import rewrite_executor
-
         conn = get_connection()
         try:
             cursor = conn.execute("SELECT * FROM orders WHERE status = 'processing'")
             stuck_orders = [dict(row) for row in cursor.fetchall()]
-            for order in stuck_orders:
-                order_id = order['order_id']
-                mode = order.get('mode', 'paragraph')
-                text = order.get('original_text', '')
-                if not text:
-                    continue
-                paragraphs = _load_paragraphs(order)
-                logging.warning(f"Recovering stuck processing order: {order_id}")
-                rewrite_executor.submit(do_background_rewrite, order_id, text, mode, paragraphs)
+            awaiting_user_ids = [
+                row['user_id'] for row in conn.execute(
+                    """SELECT DISTINCT user_id FROM orders
+                       WHERE payment_status = 'paid'
+                         AND status = 'awaiting_balance'"""
+                ).fetchall()
+            ]
         finally:
             conn.close()
+
+        for order in stuck_orders:
+            order_id = order['order_id']
+            mode = order.get('mode', 'paragraph')
+            text = order.get('original_text', '')
+            if not text:
+                continue
+            paragraphs = _load_paragraphs(order)
+            logging.warning(f"Recovering stuck processing order: {order_id}")
+            submit_rewrite_task(order_id, text, mode, paragraphs)
+
+        for user_id in awaiting_user_ids:
+            recover_awaiting_balance_orders(user_id)
     except Exception:
         logging.exception("Failed to recover processing orders on startup")

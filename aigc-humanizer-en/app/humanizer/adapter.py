@@ -4,12 +4,19 @@
 import time
 import re
 import logging
+import threading
 
 from abc import ABC, abstractmethod
 
 from app.helpers.segmenter import segment as segment_paragraphs
 
 logger = logging.getLogger("app.humanizer")
+
+_UPSTREAM_SEMAPHORE = None
+_UPSTREAM_SEMAPHORE_SIZE = None
+_UPSTREAM_SEMAPHORE_LOCK = threading.Lock()
+_UPSTREAM_RATE_LOCK = threading.Lock()
+_UPSTREAM_LAST_REQUEST_AT = 0.0
 
 
 def _cfg(name, default):
@@ -177,3 +184,98 @@ class HumanizerAdapter(ABC):
             len(tasks) - len(rewrite_tasks), (time.time() - _start) * 1000,
         )
         return "\n\n".join(parts), structured
+
+    def _rewrite_with_chunking(self, text, block_rewriter, max_words=None,
+                               request_delay=0, backend_label=None,
+                               use_global_limit=False):
+        """按上游单次词数限制切块，并逐块调用具体改写接口。"""
+        max_words = max_words or _cfg('REWRITE_MAX_WORDS', 2000)
+        backend_label = backend_label or _cfg('HUMANIZER_ADAPTER', 'unknown')
+        started = time.time()
+        chunks = self._split_text_for_requests(text, max_words)
+
+        if len(chunks) > 1:
+            logger.info(
+                "rewrite stage=rewrite backend=%s action=chunk_split words=%d chunks=%d",
+                backend_label, self._count_words(text), len(chunks),
+            )
+
+        results = []
+        for index, chunk in enumerate(chunks, 1):
+            logger.info(
+                "rewrite stage=rewrite backend=%s action=chunk_start chunk=%d/%d words=%d",
+                backend_label, index, len(chunks), self._count_words(chunk),
+            )
+            if use_global_limit:
+                results.append(self._call_with_global_limit(block_rewriter, chunk))
+            else:
+                results.append(block_rewriter(chunk))
+            if request_delay and index < len(chunks):
+                time.sleep(request_delay)
+
+        logger.info(
+            "rewrite stage=rewrite backend=%s action=done chunks=%d elapsed=%.0fms",
+            backend_label, len(chunks), (time.time() - started) * 1000,
+        )
+        return "\n\n".join(results)
+
+    @staticmethod
+    def _call_with_global_limit(block_rewriter, chunk):
+        """限制当前进程所有订单共享的上游并发数和请求启动间隔。"""
+        global _UPSTREAM_SEMAPHORE, _UPSTREAM_SEMAPHORE_SIZE
+        global _UPSTREAM_LAST_REQUEST_AT
+
+        max_concurrency = max(1, int(_cfg('HUMANIZER_GLOBAL_MAX_CONCURRENCY', 2)))
+        min_interval = max(0.0, float(_cfg('HUMANIZER_GLOBAL_MIN_INTERVAL', 1.0)))
+        with _UPSTREAM_SEMAPHORE_LOCK:
+            if (_UPSTREAM_SEMAPHORE is None or
+                    _UPSTREAM_SEMAPHORE_SIZE != max_concurrency):
+                _UPSTREAM_SEMAPHORE = threading.BoundedSemaphore(max_concurrency)
+                _UPSTREAM_SEMAPHORE_SIZE = max_concurrency
+
+        with _UPSTREAM_SEMAPHORE:
+            with _UPSTREAM_RATE_LOCK:
+                wait_seconds = min_interval - (time.monotonic() - _UPSTREAM_LAST_REQUEST_AT)
+                if wait_seconds > 0:
+                    time.sleep(wait_seconds)
+                _UPSTREAM_LAST_REQUEST_AT = time.monotonic()
+            return block_rewriter(chunk)
+
+    @classmethod
+    def _split_text_for_requests(cls, text, max_words):
+        """优先按段落和句子切分，必要时按词硬切，确保每块不超上限。"""
+        if not text or not text.strip():
+            return []
+        if cls._count_words(text) <= max_words:
+            return [text.strip()]
+
+        units = []
+        for paragraph in re.split(r'\n\s*\n', text.strip()):
+            if cls._count_words(paragraph) <= max_words:
+                units.append(paragraph)
+                continue
+            sentences = re.split(r'(?<=[.!?])\s+', paragraph)
+            for sentence in sentences:
+                words = sentence.split()
+                units.extend(
+                    " ".join(words[index:index + max_words])
+                    for index in range(0, len(words), max_words)
+                )
+
+        chunks = []
+        current = []
+        current_words = 0
+        for unit in units:
+            unit_words = cls._count_words(unit)
+            if current and current_words + unit_words > max_words:
+                chunks.append("\n\n".join(current))
+                current, current_words = [], 0
+            current.append(unit)
+            current_words += unit_words
+        if current:
+            chunks.append("\n\n".join(current))
+        return chunks
+
+    @staticmethod
+    def _count_words(text):
+        return len(text.split())

@@ -281,9 +281,9 @@ body {
 }
 
 .hero-subtitle {
-    font-size: 1.1rem;
+    font-size: 0.9rem;
     color: var(--gray-500);
-    line-height: 1.7;
+    line-height: 1.6;
     margin-bottom: 32px;
 }
 
@@ -1154,7 +1154,10 @@ body {
 .pricing-features li.disabled { color: var(--gray-300); }
 
 /* ========== FAQ ========== */
-.faq-list { max-width: 700px; margin: 0 auto; }
+.faq-list {
+    max-width: 700px;
+    margin: 0 auto;
+}
 
 .faq-item {
     border: 1px solid var(--gray-200);

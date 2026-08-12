@@ -279,6 +279,7 @@ async function triggerRewrite(wordCount, price) {
 
 /* ========== 异步改写轮询（余额充足场景） ========== */
 let _balancePollingTimer = null;
+let _balancePollingToken = 0;
 
 /**
  * 直接改写（余额充足）为异步执行，这里轮询真实进度更新步骤条，
@@ -287,8 +288,10 @@ let _balancePollingTimer = null;
  * @param {number} balanceRemaining - 扣费后余额
  */
 function startBalanceRewritePolling(orderId, balanceRemaining) {
+    const pollingToken = ++_balancePollingToken;
     if (_balancePollingTimer) {
-        clearInterval(_balancePollingTimer);
+        clearTimeout(_balancePollingTimer);
+        _balancePollingTimer = null;
     }
     // 若当前未显示进度页（如从支付弹窗切换而来），先显示；直接改写场景已显示则跳过
     const ls = document.getElementById('loading-section');
@@ -300,9 +303,10 @@ function startBalanceRewritePolling(orderId, balanceRemaining) {
     const pollingStartedAt = Date.now();
     const pollingTimeoutMs = 15 * 60 * 1000;
     // 每秒轮询持久化进度，兼顾实时性和数据库负载。
-    _balancePollingTimer = setInterval(async () => {
+    const pollOnce = async () => {
+        if (pollingToken !== _balancePollingToken) return;
         if (Date.now() - pollingStartedAt > pollingTimeoutMs) {
-            clearInterval(_balancePollingTimer);
+            _balancePollingToken++;
             _balancePollingTimer = null;
             hideLoading();
             showToast('处理时间较长，请稍后在订单记录中查看结果', 'info');
@@ -318,25 +322,28 @@ function startBalanceRewritePolling(orderId, balanceRemaining) {
                 } catch (_) {
                     // 非 JSON 错误响应使用通用提示。
                 }
-                clearInterval(_balancePollingTimer);
+                _balancePollingToken++;
                 _balancePollingTimer = null;
                 hideLoading();
                 showToast(message, 'error');
                 return;
             }
             const prog = await progResp.json();
-            if (!prog || !prog.stage) return;
+            if (!prog || !prog.stage) {
+                _balancePollingTimer = setTimeout(pollOnce, 1000);
+                return;
+            }
 
             if (prog.stage === 'done') {
                 // 改写完成：进度接口已附带完整改写结果（result 字段），直接展示
-                clearInterval(_balancePollingTimer);
+                _balancePollingToken++;
                 _balancePollingTimer = null;
                 setLoadingStep('detect_again', 'done');
                 finishBalanceRewrite(prog.result, balanceRemaining, orderId);
                 return;
             }
             if (prog.stage === 'failed') {
-                clearInterval(_balancePollingTimer);
+                _balancePollingToken++;
                 _balancePollingTimer = null;
                 hideLoading();
                 showToast('改写失败，请稍后重试', 'error');
@@ -350,7 +357,11 @@ function startBalanceRewritePolling(orderId, balanceRemaining) {
             // 轮询出错静默继续
             console.warn('Balance rewrite polling error:', err);
         }
-    }, 1000);
+        if (pollingToken === _balancePollingToken) {
+            _balancePollingTimer = setTimeout(pollOnce, 1000);
+        }
+    };
+    pollOnce();
 }
 
 /**
@@ -389,10 +400,7 @@ document.querySelectorAll('.faq-question').forEach(btn => {
         const item = btn.parentElement;
         const isOpen = item.classList.contains('open');
 
-        // Close all
         document.querySelectorAll('.faq-item').forEach(i => i.classList.remove('open'));
-
-        // Toggle current
         if (!isOpen) item.classList.add('open');
     });
 });
