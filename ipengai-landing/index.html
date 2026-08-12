@@ -5,22 +5,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
   <!-- SEO -->
-  <title>芃芃工作室 · iPENG AI — 生于数据 · 蓬勃生长</title>
-  <meta name="description" content="芃芃工作室（iPENG AI Studio），以 AI 和数据为核心的技术工作室。提供 AI 写作辅助、数据采集、投资分析等智能工具。由独立开发者 zzzheng 运营。">
-  <meta name="keywords" content="芃芃工作室, iPENG AI, 独立开发者, AI 工具, Build in Public, 数据采集, 投资分析">
+  <title>iPENG AI — 一人公司的 AI 经营系统</title>
+  <meta name="description" content="iPENG AI 为一人公司和独立创业者搭建 AI 经营系统：AgentTeam、自动化工作流、AI 写作工具、经营看板与方法论。">
+  <meta name="keywords" content="iPENG AI, 一人公司, AI 经营系统, AgentTeam, AI 经营班子, 独立开发者, AI 工具, 个人经营系统">
   <meta name="baidu-site-verification" content="codeva-7IZDgjuVCX" />
 
   <!-- Open Graph -->
-  <meta property="og:title" content="芃芃工作室 · iPENG AI — 生于数据 · 蓬勃生长">
-  <meta property="og:description" content="以 AI 和数据为核心的技术工作室，为每一个具体场景打造真正好用的智能工具。">
+  <meta property="og:title" content="iPENG AI — 一人公司的 AI 经营系统">
+  <meta property="og:description" content="用 AgentTeam、自动化工作流和个人知识库，把战略、内容、增长、执行和复盘组织成一套能持续运转的系统。">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://ipengai.cn">
   <meta property="og:image" content="https://ipengai.cn/og-image.jpg">
 
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="芃芃工作室 · iPENG AI">
-  <meta name="twitter:description" content="以 AI 和数据为核心的技术工作室。">
+  <meta name="twitter:title" content="iPENG AI — 一人公司的 AI 经营系统">
+  <meta name="twitter:description" content="AgentTeam、自动化工作流和个人经营系统。">
 
   <!-- Schema.org -->
   <script type="application/ld+json">
@@ -29,7 +29,7 @@
     "@type": "Organization",
     "name": "芃芃工作室",
     "alternateName": "iPENG AI Studio",
-    "description": "以 AI 和数据为核心的技术工作室",
+    "description": "为一人公司和独立创业者搭建 AI 经营系统",
     "url": "https://ipengai.cn",
     "founder": {
       "@type": "Person",
@@ -1518,6 +1518,335 @@
     ::-webkit-scrollbar-thumb:hover {
       background: var(--gray-700);
     }
+
+    /* =============================================================
+       HIPILOT-INSPIRED STRATEGY LAYER
+       ============================================================= */
+    :root {
+      --bg-base: #070b12;
+      --bg-surface: #0d1522;
+      --bg-card: rgba(255,255,255,0.045);
+      --bg-card-hover: rgba(255,255,255,0.075);
+      --border-dim: rgba(255,255,255,0.09);
+      --border-mid: rgba(255,255,255,0.16);
+      --green: #B8F36B;
+      --blue: #7DD3FC;
+      --purple: #C4B5FD;
+      --cyan: #5EEAD4;
+      --gold: #E8D08A;
+      --brand-grad: linear-gradient(135deg, #B8F36B, #7DD3FC, #E8D08A);
+      --brand-grad-h: linear-gradient(90deg, #B8F36B, #7DD3FC, #E8D08A);
+    }
+
+    body {
+      background:
+        radial-gradient(circle at 50% 0%, rgba(184,243,107,0.12), transparent 34%),
+        radial-gradient(circle at 80% 18%, rgba(125,211,252,0.09), transparent 28%),
+        linear-gradient(180deg, #070b12 0%, #0a101a 42%, #070b12 100%);
+      color: #9ba6b8;
+    }
+
+    body::before {
+      background-image:
+        linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+      background-size: 56px 56px;
+      mask-image: linear-gradient(to bottom, black, transparent 88%);
+    }
+
+    .navbar.scrolled {
+      background: rgba(7,11,18,0.78);
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+
+    .nav-links a {
+      color: #8d99aa;
+    }
+
+    .nav-links a:hover,
+    .nav-links a.active {
+      color: #f7fafc;
+    }
+
+    .section-tag {
+      background: rgba(184,243,107,0.09);
+      color: var(--green);
+      border-color: rgba(184,243,107,0.22);
+      border-radius: 999px;
+      letter-spacing: 0.08em;
+    }
+
+    .section-title {
+      color: #f7fafc;
+      letter-spacing: 0;
+    }
+
+    .section-desc,
+    .hero-desc,
+    .tool-card p,
+    .project-item p,
+    .blog-card p,
+    .about-hero-desc {
+      color: #8d99aa;
+    }
+
+    .landing-hero {
+      min-height: 100vh;
+      min-height: 100dvh;
+      display: flex;
+      align-items: center;
+      padding: 112px 0 64px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .landing-hero::after {
+      content: '';
+      position: absolute;
+      inset: auto 0 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(184,243,107,0.36), transparent);
+    }
+
+    .hero-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(340px, 0.95fr);
+      gap: 56px;
+      align-items: center;
+    }
+
+    .eyebrow-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--green);
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 22px;
+    }
+
+    .eyebrow-row::before {
+      content: '';
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 18px rgba(184,243,107,0.75);
+    }
+
+    .landing-hero h1 {
+      font-size: clamp(42px, 6vw, 78px);
+      line-height: 1.02;
+      font-weight: 800;
+      color: #f7fafc;
+      letter-spacing: 0;
+      max-width: 780px;
+      margin-bottom: 24px;
+    }
+
+    .landing-hero h1 span {
+      color: var(--green);
+    }
+
+    .hero-lede {
+      font-size: clamp(17px, 1.5vw, 20px);
+      line-height: 1.8;
+      color: #aab4c2;
+      max-width: 690px;
+      margin-bottom: 32px;
+    }
+
+    .hero-actions .btn {
+      border-radius: 999px;
+      padding: 15px 24px;
+    }
+
+    .btn-primary {
+      background: var(--green);
+      color: #06100b;
+      box-shadow: 0 18px 48px rgba(184,243,107,0.18);
+    }
+
+    .btn-outline {
+      color: #e6edf3;
+      border-color: rgba(255,255,255,0.15);
+      background: rgba(255,255,255,0.04);
+    }
+
+    .hero-proof {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 34px;
+      max-width: 720px;
+    }
+
+    .proof-item {
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.035);
+      border-radius: 10px;
+      padding: 13px 14px;
+    }
+
+    .proof-item strong {
+      display: block;
+      color: #f7fafc;
+      font-size: 18px;
+      margin-bottom: 2px;
+    }
+
+    .proof-item span {
+      color: #7e8a9c;
+      font-size: 12px;
+    }
+
+    .system-panel {
+      border: 1px solid rgba(255,255,255,0.12);
+      background: linear-gradient(180deg, rgba(255,255,255,0.075), rgba(255,255,255,0.035));
+      border-radius: 18px;
+      padding: 18px;
+      box-shadow: 0 28px 80px rgba(0,0,0,0.28);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .system-panel::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, rgba(184,243,107,0.11), transparent 38%, rgba(125,211,252,0.08));
+      pointer-events: none;
+    }
+
+    .panel-top {
+      position: relative;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 14px;
+      border-bottom: 1px solid rgba(255,255,255,0.09);
+      margin-bottom: 16px;
+    }
+
+    .panel-title {
+      color: #f7fafc;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .panel-status {
+      color: var(--green);
+      font-size: 12px;
+      border: 1px solid rgba(184,243,107,0.2);
+      border-radius: 999px;
+      padding: 4px 9px;
+      background: rgba(184,243,107,0.08);
+    }
+
+    .agent-map {
+      position: relative;
+      display: grid;
+      gap: 10px;
+    }
+
+    .agent-node {
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 13px 14px;
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 12px;
+      background: rgba(7,11,18,0.48);
+    }
+
+    .agent-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 18px rgba(184,243,107,0.6);
+      flex-shrink: 0;
+    }
+
+    .agent-node b {
+      display: block;
+      color: #f7fafc;
+      font-size: 14px;
+    }
+
+    .agent-node span {
+      display: block;
+      color: #7e8a9c;
+      font-size: 12px;
+      margin-top: 1px;
+    }
+
+    .system-flow {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      margin-top: 16px;
+      position: relative;
+    }
+
+    .flow-step {
+      text-align: center;
+      color: #9ba6b8;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 10px;
+      padding: 10px 6px;
+      background: rgba(255,255,255,0.035);
+      font-size: 12px;
+    }
+
+    .product-shell {
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+
+    .tools-grid {
+      max-width: 1000px;
+      grid-template-columns: repeat(3, 1fr);
+    }
+
+    .tool-card,
+    .project-item,
+    .blog-card,
+    .about-philosophy {
+      border-color: rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.045);
+      box-shadow: 0 20px 60px rgba(0,0,0,0.12);
+    }
+
+    .tool-card::after,
+    .tool-card.live-card::after {
+      background: rgba(13,21,34,0.78);
+    }
+
+    .project-item::before {
+      background: var(--green);
+    }
+
+    .playbook-card {
+      border: 1px solid rgba(184,243,107,0.18);
+      background: linear-gradient(135deg, rgba(184,243,107,0.08), rgba(255,255,255,0.035));
+    }
+
+    @media (max-width: 900px) {
+      .hero-layout {
+        grid-template-columns: 1fr;
+      }
+      .landing-hero {
+        padding-top: 100px;
+      }
+      .hero-proof {
+        grid-template-columns: 1fr;
+      }
+      .tools-grid {
+        grid-template-columns: 1fr;
+      }
+    }
   </style>
 </head>
 <body>
@@ -1554,12 +1883,13 @@
           <circle cx="80" cy="152" r="16" fill="url(#nlg)"/>
           <path d="M32 166 Q80 184 128 166" stroke="#3B82F6" stroke-width="7" stroke-linecap="round" opacity="0.45"/>
         </svg>
-        <span>芃芃工作室 <span class="gradient-text" style="font-weight:400;font-size:0.9em;">iPENG AI</span></span>
+        <span>iPENG AI <span class="gradient-text" style="font-weight:400;font-size:0.9em;">Operating System</span></span>
       </a>
       <div class="nav-links" id="navLinks">
+        <a href="#home">首页</a>
         <a href="#tools">产品</a>
-        <a href="#projects">项目</a>
-        <a href="#writing">专栏</a>
+        <a href="#projects">AgentTeam</a>
+        <a href="#writing">Blog</a>
         <a href="#about">关于</a>
       </div>
       <button class="hamburger" id="hamburger" aria-label="切换菜单" type="button">
@@ -1572,14 +1902,81 @@
 
   <!-- Mobile Menu -->
   <div class="mobile-menu" id="mobileMenu" role="dialog" aria-modal="true">
+    <a href="#home" class="mobile-nav-link">首页</a>
     <a href="#tools" class="mobile-nav-link">产品</a>
-    <a href="#projects" class="mobile-nav-link">项目</a>
-    <a href="#writing" class="mobile-nav-link">专栏</a>
+    <a href="#projects" class="mobile-nav-link">AgentTeam</a>
+    <a href="#writing" class="mobile-nav-link">Blog</a>
     <a href="#about" class="mobile-nav-link">关于</a>
   </div>
 
   <!-- =============================================================
-       PRODUCTS SECTION — 首页首屏
+       HERO SECTION
+       ============================================================= -->
+  <section id="home" class="landing-hero snap-section">
+    <div class="container">
+      <div class="hero-layout">
+        <div class="reveal">
+          <div class="eyebrow-row">AI operating system for solo business</div>
+          <h1>为一人公司搭建 <span>AI 经营系统</span></h1>
+          <p class="hero-lede">
+            用 AgentTeam、自动化工作流和个人知识库，把战略、内容、增长、执行和复盘组织成一套能持续运转的系统。
+          </p>
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="#projects">查看 AgentTeam</a>
+            <a class="btn btn-outline" href="#tools">浏览产品</a>
+          </div>
+          <div class="hero-proof">
+            <div class="proof-item">
+              <strong>5+</strong>
+              <span>长期 Agent 角色</span>
+            </div>
+            <div class="proof-item">
+              <strong>3</strong>
+              <span>经营闭环：战略 / 增长 / 执行</span>
+            </div>
+            <div class="proof-item">
+              <strong>Daily</strong>
+              <span>简报、周报、记忆沉淀</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="system-panel reveal reveal-delay-2" aria-label="AgentTeam system preview">
+          <div class="panel-top">
+            <div class="panel-title">AgentTeam / AI 经营班子</div>
+            <div class="panel-status">Running</div>
+          </div>
+          <div class="agent-map">
+            <div class="agent-node">
+              <div class="agent-dot"></div>
+              <div><b>清岚 · 战略总教练</b><span>方向判断 / 组织管理 / 商机雷达</span></div>
+            </div>
+            <div class="agent-node">
+              <div class="agent-dot"></div>
+              <div><b>知衡 · 增长运营</b><span>渠道实验 / 转化诊断 / 数据周报</span></div>
+            </div>
+            <div class="agent-node">
+              <div class="agent-dot"></div>
+              <div><b>小墨 · 内容主理人</b><span>选题 / 文案 / 多平台表达</span></div>
+            </div>
+            <div class="agent-node">
+              <div class="agent-dot"></div>
+              <div><b>小搭 · 专项执行</b><span>项目推进 / 看板刷新 / 资料整理</span></div>
+            </div>
+          </div>
+          <div class="system-flow">
+            <div class="flow-step">感知</div>
+            <div class="flow-step">判断</div>
+            <div class="flow-step">行动</div>
+            <div class="flow-step">进化</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- =============================================================
+       PRODUCTS SECTION
        ============================================================= -->
   <section id="tools" class="section snap-section">
 
@@ -1587,7 +1984,7 @@
       <div class="text-center reveal">
         <span class="section-tag">PRODUCTS</span>
         <h2 class="section-title">产品与服务</h2>
-        <p class="section-desc">每个产品聚焦一个场景，解决一个实际问题。</p>
+        <p class="section-desc">从一个具体问题开始，逐步沉淀成可复用的经营系统、工具和方法论。</p>
       </div>
 
       <div class="tools-grid">
@@ -1597,25 +1994,39 @@
               <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
             </svg>
           </div>
-          <h3>AI Writer <span class="card-arrow">↗</span></h3>
-          <p>英文论文 AI 率检测与降 AI 改写。支持 Turnitin 风格多维评分，段落级分析，保留学术原意。</p>
+          <h3>Huma AI Writer <span class="card-arrow">↗</span></h3>
+          <p>英文论文与报告的 AI 痕迹检测、段落诊断和自然化改写。先解决真实需求，再把服务沉淀成产品。</p>
           <div class="tool-meta">
             <span class="tool-status live">已上线</span>
             <span class="tool-link">立即使用 →</span>
           </div>
         </div>
 
-        <div class="tool-card coming reveal reveal-delay-2">
+        <div class="tool-card live-card reveal reveal-delay-2" onclick="document.querySelector('#projects').scrollIntoView({behavior:'smooth'})" role="link" tabindex="0" onkeydown="if(event.key==='Enter')this.click()">
           <div class="tool-icon blue">
             <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><line x1="21.17" y1="8" x2="12" y2="8"/><line x1="3.95" y1="6.06" x2="8.54" y2="14"/><line x1="10.88" y1="21.94" x2="15.46" y2="14"/>
+              <path d="M12 3v4"/><path d="M12 17v4"/><path d="M4.22 6.22l2.83 2.83"/><path d="M16.95 16.95l2.83 2.83"/><path d="M3 12h4"/><path d="M17 12h4"/><path d="M4.22 17.78l2.83-2.83"/><path d="M16.95 7.05l2.83-2.83"/><circle cx="12" cy="12" r="4"/>
             </svg>
           </div>
-          <h3>Data Spider</h3>
-          <p>多平台数据采集工具，支持小红书、公众号、YouTube 等信源的结构化内容获取与需求监控。</p>
+          <h3>AgentTeam 搭建包 <span class="card-arrow">↘</span></h3>
+          <p>一人公司的 AI 经营班子搭建方法：角色设计、工作手册、红黄灯机制、周报、记忆和 Dashboard。</p>
           <div class="tool-meta">
-            <span class="tool-status coming">开发中</span>
-            <span class="coming-badge">即将上线</span>
+            <span class="tool-status live">验证中</span>
+            <span class="tool-link">查看结构 →</span>
+          </div>
+        </div>
+
+        <div class="tool-card playbook-card reveal reveal-delay-3">
+          <div class="tool-icon purple">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#C4B5FD" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><path d="M8 7h8"/><path d="M8 11h6"/>
+            </svg>
+          </div>
+          <h3>一人公司经营手册</h3>
+          <p>把真实创业过程中的系统搭建、渠道实验、内容复盘和 AI 工作流，整理成可持续更新的 Playbook。</p>
+          <div class="tool-meta">
+            <span class="tool-status live">规划中</span>
+            <span class="tool-link">Book / Playbook</span>
           </div>
         </div>
       </div>
@@ -1635,9 +2046,9 @@
   <section id="projects" class="section snap-section">
     <div class="container">
       <div class="text-center reveal">
-        <span class="section-tag">PROJECTS</span>
-        <h2 class="section-title">探索中项目</h2>
-        <p class="section-desc">从想法到落地，每一个项目都是一次成长</p>
+        <span class="section-tag">AGENTTEAM</span>
+        <h2 class="section-title">一人公司的 AI 经营班子</h2>
+        <p class="section-desc">大公司有经营班子，一人公司也该有自己的 AI 经营班子。</p>
       </div>
 
       <div class="projects-grid">
@@ -1647,15 +2058,15 @@
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
             </div>
             <div>
-              <h4>data-analysis agent</h4>
-              <div class="proj-sub">自主数据分析助手</div>
+              <h4>战略总教练</h4>
+              <div class="proj-sub">方向判断 / 组织管理 / 商机雷达</div>
             </div>
           </div>
-          <p>接受任务信息，读取数据建立统计分析，数据可视化，数据报告呈现。</p>
+          <p>负责判断方向是否值得追、组织分工是否合理、哪些新机会应该进入验证池。</p>
           <div class="proj-tags">
-            <span>数据分析</span>
-            <span>可视化</span>
-            <span>AI Agent</span>
+            <span>Strategy</span>
+            <span>Radar</span>
+            <span>Review</span>
           </div>
         </div>
 
@@ -1665,15 +2076,15 @@
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><line x1="21.17" y1="8" x2="12" y2="8"/><line x1="3.95" y1="6.06" x2="8.54" y2="14"/><line x1="10.88" y1="21.94" x2="15.46" y2="14"/></svg>
             </div>
             <div>
-              <h4>小红书需求监控</h4>
-              <div class="proj-sub">Spider-Man 数据采集平台</div>
+              <h4>增长运营</h4>
+              <div class="proj-sub">渠道实验 / 转化诊断 / 增长周报</div>
             </div>
           </div>
-          <p>基于 MCP 协议的小红书内容采集与需求线索监控平台，自动搜索热点帖子、匹配业务需求、结构化管理采集数据。</p>
+          <p>把淘宝、知乎、小红书、SEO 等渠道当作实验系统，持续记录真实信号和转化阻塞。</p>
           <div class="proj-tags">
-            <span>MCP</span>
-            <span>爬虫</span>
-            <span>自动化</span>
+            <span>Growth</span>
+            <span>Channel</span>
+            <span>Conversion</span>
           </div>
         </div>
 
@@ -1683,15 +2094,15 @@
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
             </div>
             <div>
-              <h4>Trade Analytics</h4>
-              <div class="proj-sub">宏观经济与交易策略分析</div>
+              <h4>内容主理人</h4>
+              <div class="proj-sub">选题 / 文案 / 个人品牌表达</div>
             </div>
           </div>
-          <p>宏观经济分析与投资交易策略工具，覆盖技术面、基本面、情绪面多维度扫描，集成多数据源并生成结构化策略报告。</p>
+          <p>从真实系统和创业过程里提炼选题，把 AI 工具化、一人公司和产品验证讲给市场听。</p>
           <div class="proj-tags">
-            <span>数据分析</span>
-            <span>可视化</span>
-            <span>策略生成</span>
+            <span>Content</span>
+            <span>Story</span>
+            <span>Distribution</span>
           </div>
         </div>
 
@@ -1701,15 +2112,15 @@
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
             </div>
             <div>
-              <h4>Obsidian Agent 系统</h4>
-              <div class="proj-sub">AI 驱动的知识管理工具链</div>
+              <h4>执行与看板</h4>
+              <div class="proj-sub">专项推进 / 周报 / 记忆沉淀</div>
             </div>
           </div>
-          <p>基于 Claude Code 的 Obsidian 知识管理 Agent 系统，涵盖 LLM Wiki 三层架构、自动化工作流、跨平台工具集成。</p>
+          <p>把行动项、状态看板、daily memory 和输出页面串起来，让系统不是写完就散。</p>
           <div class="proj-tags">
-            <span>AI Agent</span>
-            <span>知识管理</span>
-            <span>自动化</span>
+            <span>Ops</span>
+            <span>Memory</span>
+            <span>Dashboard</span>
           </div>
         </div>
       </div>
@@ -1722,9 +2133,9 @@
   <section id="writing" class="section snap-section">
     <div class="container">
       <div class="text-center reveal">
-        <span class="section-tag">COLUMN</span>
-        <h2 class="section-title">技术专栏</h2>
-        <p class="section-desc">记录开发中的技术决策、踩坑经验和产品思考</p>
+        <span class="section-tag">BLOG / BOOK</span>
+        <h2 class="section-title">经营系统笔记</h2>
+        <p class="section-desc">记录一人公司、AI 工具化、AgentTeam 搭建和产品验证中的真实判断。</p>
       </div>
 
       <div class="blog-grid">
@@ -1733,7 +2144,7 @@
             <span style="color:var(--green);font-weight:500;">已发布</span>
           </div>
           <h4>独立开发者如何搭建 AI 产品的技术栈</h4>
-          <p>从数据库选型到部署架构，聊聊我在构建 AI Writer 过程中的技术取舍。</p>
+          <p>从数据库选型到部署架构，记录 Huma 从需求到上线过程中的技术取舍。</p>
           <div class="blog-tags">
             <span>技术</span>
             <span>架构</span>
@@ -1741,12 +2152,12 @@
           </div>
         </article>
 
-<article class="blog-card reveal reveal-delay-2" onclick="window.location='blog/001-降AI率实测-从78%到12%的全流程.html'" style="cursor:pointer;">
+<article class="blog-card reveal reveal-delay-2" onclick="window.location='blog/001-降AI率实测-从78到12的全流程.html'" style="cursor:pointer;">
           <div class="blog-meta">
             <span style="color:var(--green);font-weight:500;">已发布</span>
           </div>
           <h4>降 AI 率实测：从 78% 到 12% 的全流程</h4>
-          <p>一篇真实的 AI 写作降率全流程记录。从原始输出的高 AI 评分到最终通过，每个环节做了什么、效果如何。</p>
+          <p>把真实服务经验沉淀成产品能力：检测、诊断、改写、复测，每个环节都可追踪。</p>
           <div class="blog-tags">
             <span>实测</span>
             <span>降AI率</span>
@@ -1754,12 +2165,12 @@
           </div>
         </article>
 
-        <article class="blog-card reveal reveal-delay-3" onclick="window.location='blog/002-DeepSeek写论文AI率87%-处理后能降到多少.html'" style="cursor:pointer;">
+        <article class="blog-card reveal reveal-delay-3" onclick="window.location='blog/002-DeepSeek写论文AI率87-处理后能降到多少.html'" style="cursor:pointer;">
           <div class="blog-meta">
             <span style="color:var(--green);font-weight:500;">已发布</span>
           </div>
           <h4>DeepSeek 写论文 AI 率 87%，处理后能降到多少？</h4>
-          <p>用 DeepSeek 写论文，AI 检测率惊人地高。实测降率处理后的实际效果，看看能不能达到学术要求。
+          <p>用真实案例看 AI 写作工具如何从“生成内容”进入“可交付结果”的产品化流程。</p>
           <div class="blog-tags">
             <span>DeepSeek</span>
             <span>降AI率</span>
@@ -1772,7 +2183,7 @@
             <span style="color:var(--green);font-weight:500;">已发布</span>
           </div>
           <h4>Turnitin 到底怎么检测 AI 的？揭秘 5 大检测维度</h4>
-          <p>困惑度、突发性、AI 模式识别——拆解 Turnitin 风格检测算法的工作机制，了解 AI 率是怎么算出来的。</p>
+          <p>拆解 AI 检测背后的语言模式，也拆解 Huma 为什么要做段落级诊断。</p>
           <div class="blog-tags">
             <span>Turnitin</span>
             <span>检测原理</span>
@@ -1798,26 +2209,25 @@
     <div class="container">
       <div class="text-center reveal">
         <span class="section-tag">ABOUT</span>
-        <h2 class="section-title">关于<span class="gradient-text">工作室</span></h2>
+        <h2 class="section-title">关于 <span class="gradient-text">iPENG AI</span></h2>
       </div>
 
       <div class="about-stack reveal reveal-delay-1">
         <!-- Brand story -->
         <div class="about-stack-brand">
-          <p class="hero-subtitle">生于数据 · 蓬勃生长</p>
+          <p class="hero-subtitle">Solo business · AI operating system</p>
           <h3 class="about-hero-heading">
             <span id="type-line"></span>
             <span class="type-cursor" id="typeCursor">|</span>
           </h3>
           <p class="about-hero-desc">
-            以 AI 和数据为核心的技术工作室。<br>
-            为每一个具体场景打造真正好用的智能工具。
+            iPENG AI 是一个从真实创业现场长出来的 AI 产品工作室。<br>
+            先把自己的经营系统跑通，再把其中可复用的工具、模板和方法交付出去。
           </p>
           <div class="about-philosophy">
             <p>
-              「芃」，《诗经》有云"芃芃其麦"，寓意草木茂盛、蓬勃生长。
-              这也是工作室的核心理念——用 AI 和数据技术，让每一个人和组织都能
-              释放潜能、肆意生长。
+              这里不追求把 AI 包装成万能助手，而是把它放进真实经营流程：
+              让每个 Agent 有角色、有边界、有记忆、有看板，也有复盘和迭代。
             </p>
           </div>
         </div>
@@ -1861,20 +2271,21 @@
           <circle cx="80" cy="152" r="16" fill="url(#nlg)"/>
           <path d="M32 166 Q80 184 128 166" stroke="#3B82F6" stroke-width="7" stroke-linecap="round" opacity="0.45"/>
         </svg>
-            <span style="color:#fff;">芃芃工作室 <span class="gradient-text" style="font-weight:400;font-size:0.9em;">iPENG AI</span></span>
+            <span style="color:#fff;">iPENG AI <span class="gradient-text" style="font-weight:400;font-size:0.9em;">Operating System</span></span>
           </div>
-          <p>以 AI 和数据为核心的技术工作室，为每一个具体场景打造真正好用的智能工具。</p>
+          <p>为一人公司和独立创业者搭建 AI 经营系统：AgentTeam、自动化工作流、产品工具和经营手册。</p>
         </div>
         <div class="footer-col">
           <h5>导航</h5>
+          <a href="#home">首页</a>
           <a href="#tools">产品</a>
-          <a href="#projects">项目</a>
-          <a href="#writing">专栏</a>
+          <a href="#projects">AgentTeam</a>
+          <a href="#writing">Blog</a>
           <a href="#about">关于</a>
         </div>
         <div class="footer-col">
           <h5>连接</h5>
-          <a href="https://huma.ipengai.cn">AI Writer</a>
+          <a href="https://huma.ipengai.cn">Huma AI Writer</a>
           <a href="https://github.com/tjzzz">GitHub</a>
         </div>
       </div>
@@ -1929,7 +2340,7 @@
     // TYPING EFFECT
     // =============================================================
     const typeLine = document.getElementById('type-line');
-    const texts = ['AI 驱动的工具工作室', '生于数据 · 蓬勃生长', '为场景打造好用工具'];
+    const texts = ['一人公司的 AI 经营系统', '把 Agent 组织成经营班子', '从真实业务里长出产品'];
     let textIndex = 0;
     let charIndex = 0;
     let isDeleting = false;
