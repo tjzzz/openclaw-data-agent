@@ -51,7 +51,6 @@ ALLOWED_UPLOAD_MIMETYPES = {
 }
 DELETE_UPLOADED_FILE = True   # 上传文件解析完成后是否删除临时文件（True=删除，False=保留）
 
-ADMIN_PASSWORD = 'admin123'
 
 ALIPAY_APP_ID = ''
 ALIPAY_PID = ''
