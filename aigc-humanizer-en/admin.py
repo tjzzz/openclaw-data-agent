@@ -205,6 +205,79 @@ def api_order_detail(order_id):
         conn.close()
 
 
+@admin_app.route('/admin/api/trends')
+@login_required
+def api_trends():
+    """Daily aggregated time series: new users, orders, paid orders, revenue."""
+    start_date = request.args.get('start', '')
+    end_date = request.args.get('end', '')
+
+    try:
+        start_dt = datetime.strptime(start_date, '%Y-%m-%d').date()
+        end_dt = datetime.strptime(end_date, '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        return jsonify({'error': '请提供有效的日期，格式 YYYY-MM-DD'}), 400
+
+    if start_dt > end_dt:
+        return jsonify({'error': '开始日期不能晚于结束日期'}), 400
+    if (end_dt - start_dt).days > 366:
+        return jsonify({'error': '时间范围不能超过一年'}), 400
+
+    start_iso = datetime.combine(start_dt, datetime.min.time()).isoformat()
+    end_iso = datetime.combine(end_dt + timedelta(days=1), datetime.min.time()).isoformat()
+
+    conn = get_db()
+    try:
+        user_rows = conn.execute(
+            "SELECT substr(created_at, 1, 10) AS day, COUNT(*) AS cnt FROM users "
+            "WHERE created_at >= ? AND created_at < ? GROUP BY day",
+            (start_iso, end_iso)
+        ).fetchall()
+        order_rows = conn.execute(
+            "SELECT substr(created_at, 1, 10) AS day, COUNT(*) AS cnt, "
+            "SUM(CASE WHEN payment_status = 'paid' THEN 1 ELSE 0 END) AS paid_cnt, "
+            "COALESCE(SUM(CASE WHEN payment_status = 'paid' THEN price ELSE 0 END), 0) AS revenue "
+            "FROM orders WHERE created_at >= ? AND created_at < ? GROUP BY day",
+            (start_iso, end_iso)
+        ).fetchall()
+    finally:
+        conn.close()
+
+    users_by_day = {r['day']: r['cnt'] for r in user_rows}
+    orders_by_day = {r['day']: r['cnt'] for r in order_rows}
+    paid_by_day = {r['day']: (r['paid_cnt'] or 0) for r in order_rows}
+    revenue_by_day = {r['day']: (r['revenue'] or 0) for r in order_rows}
+
+    days, new_users, orders_series, paid_series, revenue_series = [], [], [], [], []
+    cur = start_dt
+    while cur <= end_dt:
+        key = cur.isoformat()
+        days.append(key)
+        new_users.append(users_by_day.get(key, 0))
+        orders_series.append(orders_by_day.get(key, 0))
+        paid_series.append(paid_by_day.get(key, 0))
+        revenue_series.append(round(revenue_by_day.get(key, 0), 2))
+        cur += timedelta(days=1)
+
+    return jsonify({
+        'start_date': start_date,
+        'end_date': end_date,
+        'days': days,
+        'series': {
+            'new_users': new_users,
+            'orders': orders_series,
+            'paid_orders': paid_series,
+            'revenue': revenue_series,
+        },
+        'totals': {
+            'new_users': sum(new_users),
+            'orders': sum(orders_series),
+            'paid_orders': sum(paid_series),
+            'revenue': round(sum(revenue_series), 2),
+        },
+    })
+
+
 # ============================================================
 #  User Management
 # ============================================================
@@ -614,6 +687,36 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
         }
         /* Links */
         .header a { text-decoration: none; color: #4f46e5; font-size: 0.875rem; }
+        /* Trends */
+        .metric-chip {
+            display: inline-flex; align-items: center; gap: 6px;
+            font-size: 0.85rem; font-weight: 500; color: #334155;
+            background: #fff; border: 1px solid #e2e8f0; border-radius: 8px;
+            padding: 7px 12px; cursor: pointer; user-select: none;
+        }
+        .metric-chip input { accent-color: #4f46e5; cursor: pointer; margin: 0; }
+        .metric-chip .dot, .legend-item .dot, .chart-tooltip .dot {
+            display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+        }
+        .chart-card {
+            background: #fff; border-radius: 12px; padding: 20px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+        }
+        .chart-legend { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
+        .legend-item {
+            display: inline-flex; align-items: center; gap: 6px;
+            font-size: 0.8rem; color: #475569; cursor: pointer; user-select: none;
+            padding: 3px 10px; border-radius: 6px; background: #f8fafc;
+        }
+        .legend-item:hover { background: #f1f5f9; }
+        .legend-item.off { opacity: 0.35; text-decoration: line-through; }
+        #trend-svg { width: 100%; height: auto; display: block; }
+        .chart-tooltip {
+            position: absolute; display: none; pointer-events: none; z-index: 10;
+            background: #1e293b; color: #fff; border-radius: 8px;
+            padding: 8px 12px; font-size: 0.78rem; line-height: 1.6;
+            white-space: nowrap; box-shadow: 0 4px 12px rgba(0,0,0,0.18);
+        }
     </style>
 </head>
 <body>
@@ -627,6 +730,7 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
 
     <div class="tabs">
         <button class="tab-btn active" onclick="switchTab('orders')" id="tab-orders">📋 订单</button>
+        <button class="tab-btn" onclick="switchTab('trends')" id="tab-trends">📈 趋势</button>
         <button class="tab-btn" onclick="switchTab('activation')" id="tab-activation">🎯 兑换码</button>
         <button class="tab-btn" onclick="switchTab('users')" id="tab-users">👤 用户</button>
     </div>
@@ -721,6 +825,77 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
             <div class="empty">
                 <div class="empty-icon">📭</div>
                 <p>该时间范围暂无订单</p>
+            </div>
+        </div>
+    </div>
+    </div>
+
+    <!-- ============ TAB: TRENDS ============ -->
+    <div class="tab-content" id="content-trends">
+    <div class="main">
+        <!-- Metric selector -->
+        <div class="toolbar">
+            <h2 style="font-size:1rem;font-weight:600;margin-right:16px;">📈 趋势图</h2>
+            <label>指标：</label>
+            <label class="metric-chip"><input type="checkbox" id="metric-new_users" checked onchange="renderTrendChart()"><span class="dot" style="background:#8b5cf6;"></span>每日用户数</label>
+            <label class="metric-chip"><input type="checkbox" id="metric-orders" checked onchange="renderTrendChart()"><span class="dot" style="background:#2563eb;"></span>订单量</label>
+            <label class="metric-chip"><input type="checkbox" id="metric-paid_orders" checked onchange="renderTrendChart()"><span class="dot" style="background:#16a34a;"></span>付费订单量</label>
+            <label class="metric-chip"><input type="checkbox" id="metric-revenue" checked onchange="renderTrendChart()"><span class="dot" style="background:#f59e0b;"></span>营收额</label>
+        </div>
+
+        <!-- Date range -->
+        <div class="toolbar">
+            <label>时间范围：</label>
+            <input type="date" id="trend-date-start">
+            <span class="date-sep">至</span>
+            <input type="date" id="trend-date-end">
+            <button class="btn-query" onclick="loadTrends()">查询</button>
+            <button class="btn-preset" onclick="setTrendPreset('7days')">近7天</button>
+            <button class="btn-preset" onclick="setTrendPreset('30days')">近30天</button>
+            <button class="btn-preset" onclick="setTrendPreset('90days')">近90天</button>
+            <button class="btn-preset" onclick="setTrendPreset('thisMonth')">本月</button>
+        </div>
+
+        <div class="error-banner" id="trend-error-banner" style="display:none;"></div>
+
+        <!-- Totals for selected range -->
+        <div class="summary" id="trend-summary" style="display:none;">
+            <div class="summary-card">
+                <div class="label">新增用户</div>
+                <div class="value" id="ts-users" style="color:#8b5cf6;">0</div>
+            </div>
+            <div class="summary-card">
+                <div class="label">订单总数</div>
+                <div class="value" id="ts-orders" style="color:#2563eb;">0</div>
+            </div>
+            <div class="summary-card">
+                <div class="label">付费订单</div>
+                <div class="value" id="ts-paid" style="color:#16a34a;">0</div>
+            </div>
+            <div class="summary-card">
+                <div class="label">总营收 (¥)</div>
+                <div class="value revenue" id="ts-revenue">0.00</div>
+            </div>
+        </div>
+
+        <!-- Chart -->
+        <div class="chart-card" id="trend-chart-card" style="display:none;">
+            <div class="chart-legend" id="trend-legend"></div>
+            <div style="position:relative;">
+                <svg id="trend-svg"></svg>
+                <div class="chart-tooltip" id="trend-tooltip"></div>
+            </div>
+        </div>
+
+        <!-- Loading / Empty -->
+        <div class="loading" id="trend-loading" style="display:none;">
+            <div class="spinner"></div>
+            <div>加载中</div>
+        </div>
+        <div class="table-wrapper" id="trend-empty" style="display:none;">
+            <div class="empty">
+                <div class="empty-icon">📉</div>
+                <p>该时间范围暂无数据</p>
             </div>
         </div>
     </div>
@@ -1085,6 +1260,7 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
         document.getElementById('content-' + tab).classList.add('active');
         if (tab === 'activation') loadActivationCodes();
         if (tab === 'users') loadUsers();
+        if (tab === 'trends') loadTrends();
     }
 
     /* ========== ACTIVATION CODES ========== */
@@ -1207,6 +1383,227 @@ DASHBOARD_TEMPLATE = """<!DOCTYPE html>
             document.getElementById('users-result').textContent = '';
         }
     }
+
+    /* ========== TRENDS ========== */
+    const TREND_METRICS = {
+        new_users:   { label: '每日用户数', color: '#8b5cf6', axis: 'left' },
+        orders:      { label: '订单量', color: '#2563eb', axis: 'left' },
+        paid_orders: { label: '付费订单量', color: '#16a34a', axis: 'left' },
+        revenue:     { label: '营收额(¥)', color: '#f59e0b', axis: 'right' }
+    };
+    let trendData = null;
+
+    function getSelectedMetrics() {
+        return Object.keys(TREND_METRICS).filter(
+            k => document.getElementById('metric-' + k).checked
+        );
+    }
+
+    function initTrendDates() {
+        const now = new Date();
+        const start = new Date(now);
+        start.setDate(start.getDate() - 6);
+        document.getElementById('trend-date-start').value = fmtDate(start);
+        document.getElementById('trend-date-end').value = fmtDate(now);
+        const firstPreset = document.querySelector('#content-trends .btn-preset');
+        if (firstPreset) firstPreset.classList.add('active');
+    }
+
+    function setTrendPreset(type) {
+        const now = new Date();
+        let start;
+        switch (type) {
+            case '7days':
+                start = new Date(now); start.setDate(start.getDate() - 6); break;
+            case '30days':
+                start = new Date(now); start.setDate(start.getDate() - 29); break;
+            case '90days':
+                start = new Date(now); start.setDate(start.getDate() - 89); break;
+            case 'thisMonth':
+                start = new Date(now.getFullYear(), now.getMonth(), 1); break;
+        }
+        document.getElementById('trend-date-start').value = fmtDate(start);
+        document.getElementById('trend-date-end').value = fmtDate(now);
+        document.querySelectorAll('#content-trends .btn-preset').forEach(b => b.classList.remove('active'));
+        event.target.classList.add('active');
+        loadTrends();
+    }
+
+    async function loadTrends() {
+        const start = document.getElementById('trend-date-start').value;
+        const end = document.getElementById('trend-date-end').value;
+        if (!start || !end) return;
+
+        const errEl = document.getElementById('trend-error-banner');
+        errEl.style.display = 'none';
+        document.getElementById('trend-loading').style.display = 'block';
+        document.getElementById('trend-chart-card').style.display = 'none';
+        document.getElementById('trend-summary').style.display = 'none';
+        document.getElementById('trend-empty').style.display = 'none';
+
+        try {
+            const resp = await fetch(
+                '/admin/api/trends?start=' + encodeURIComponent(start) + '&end=' + encodeURIComponent(end)
+            );
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || '请求失败');
+            trendData = data;
+
+            document.getElementById('ts-users').textContent = data.totals.new_users.toLocaleString();
+            document.getElementById('ts-orders').textContent = data.totals.orders.toLocaleString();
+            document.getElementById('ts-paid').textContent = data.totals.paid_orders.toLocaleString();
+            document.getElementById('ts-revenue').textContent = data.totals.revenue.toFixed(2);
+            document.getElementById('trend-summary').style.display = 'grid';
+
+            if (!data.days.length) {
+                document.getElementById('trend-empty').style.display = 'block';
+            } else {
+                document.getElementById('trend-chart-card').style.display = 'block';
+                renderTrendChart();
+            }
+        } catch (e) {
+            errEl.textContent = e.message;
+            errEl.style.display = 'block';
+        } finally {
+            document.getElementById('trend-loading').style.display = 'none';
+        }
+    }
+
+    function toggleMetric(key) {
+        const cb = document.getElementById('metric-' + key);
+        cb.checked = !cb.checked;
+        renderTrendChart();
+    }
+
+    function fmtAxisNum(v) {
+        v = Number(v) || 0;
+        if (v >= 10000) return (v / 10000).toFixed(v % 10000 ? 1 : 0) + 'w';
+        if (v >= 1000) return (v / 1000).toFixed(v % 1000 ? 1 : 0) + 'k';
+        return String(Math.round(v * 100) / 100);
+    }
+
+    function renderTrendChart() {
+        const data = trendData;
+        if (!data) return;
+        const metrics = getSelectedMetrics();
+
+        // Legend (click to toggle, synced with checkboxes)
+        document.getElementById('trend-legend').innerHTML = Object.keys(TREND_METRICS).map(k => {
+            const m = TREND_METRICS[k];
+            const on = metrics.includes(k);
+            return '<span class="legend-item' + (on ? '' : ' off') + '" onclick="toggleMetric(\\'' + k + '\\')">'
+                + '<span class="dot" style="background:' + m.color + ';"></span>' + m.label + '</span>';
+        }).join('');
+
+        const svg = document.getElementById('trend-svg');
+        const tooltip = document.getElementById('trend-tooltip');
+        tooltip.style.display = 'none';
+
+        if (!metrics.length) {
+            svg.innerHTML = '<text x="480" y="190" text-anchor="middle" fill="#94a3b8" font-size="14">请至少选择一个指标</text>';
+            return;
+        }
+
+        const days = data.days;
+        const n = days.length;
+        const W = 960, H = 380, padL = 60, padR = 64, padT = 24, padB = 42;
+        const innerW = W - padL - padR, innerH = H - padT - padB;
+
+        // Round axis max up to a nice number
+        function niceMax(v) {
+            if (v <= 0) return 4;
+            const p = Math.pow(10, Math.floor(Math.log10(v)));
+            for (const mul of [1, 2, 4, 5, 10]) { if (mul * p >= v) return mul * p; }
+            return 10 * p;
+        }
+        const leftKeys = metrics.filter(k => TREND_METRICS[k].axis === 'left');
+        const rightKeys = metrics.filter(k => TREND_METRICS[k].axis === 'right');
+        const maxOf = keys => Math.max(...keys.flatMap(k => data.series[k]), 0);
+        const leftMax = niceMax(maxOf(leftKeys));
+        const rightMax = niceMax(maxOf(rightKeys));
+
+        const xAt = i => n === 1 ? padL + innerW / 2 : padL + innerW * i / (n - 1);
+        const yAt = (v, max) => padT + innerH * (1 - v / max);
+
+        let g = '';
+        // Gridlines + dual y-axis labels
+        const TICKS = 4;
+        for (let t = 0; t <= TICKS; t++) {
+            const frac = t / TICKS;
+            const y = padT + innerH * (1 - frac);
+            g += '<line x1="' + padL + '" y1="' + y + '" x2="' + (W - padR) + '" y2="' + y + '" stroke="#eef2f7" stroke-width="1"/>';
+            g += '<text x="' + (padL - 8) + '" y="' + (y + 4) + '" text-anchor="end" fill="#94a3b8" font-size="11">' + fmtAxisNum(leftMax * frac) + '</text>';
+            if (rightKeys.length) {
+                g += '<text x="' + (W - padR + 8) + '" y="' + (y + 4) + '" text-anchor="start" fill="#94a3b8" font-size="11">' + fmtAxisNum(rightMax * frac) + '</text>';
+            }
+        }
+        g += '<line x1="' + padL + '" y1="' + (padT + innerH) + '" x2="' + (W - padR) + '" y2="' + (padT + innerH) + '" stroke="#cbd5e1" stroke-width="1"/>';
+
+        // X labels (thin out on long ranges)
+        const step = Math.max(1, Math.ceil(n / 8));
+        for (let i = 0; i < n; i += step) {
+            g += '<text x="' + xAt(i) + '" y="' + (H - 14) + '" text-anchor="middle" fill="#94a3b8" font-size="11">' + days[i].slice(5) + '</text>';
+        }
+        if ((n - 1) % step !== 0) {
+            g += '<text x="' + xAt(n - 1) + '" y="' + (H - 14) + '" text-anchor="middle" fill="#94a3b8" font-size="11">' + days[n - 1].slice(5) + '</text>';
+        }
+
+        // Series lines + dots
+        for (const k of metrics) {
+            const m = TREND_METRICS[k];
+            const vals = data.series[k];
+            const max = m.axis === 'left' ? leftMax : rightMax;
+            const pts = vals.map((v, i) => [xAt(i), yAt(v, max)]);
+            if (n > 1) {
+                g += '<polyline fill="none" stroke="' + m.color + '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" points="'
+                    + pts.map(p => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ') + '"/>';
+            }
+            g += pts.map(p => '<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="2.5" fill="' + m.color + '"/>').join('');
+        }
+
+        // Hover guide line
+        g += '<line id="hover-line" x1="0" y1="' + padT + '" x2="0" y2="' + (padT + innerH) + '" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 3" visibility="hidden"/>';
+
+        svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+        svg.innerHTML = g;
+
+        svg.onmousemove = function(e) {
+            const rect = svg.getBoundingClientRect();
+            const px = (e.clientX - rect.left) / rect.width * W;
+            let idx = Math.round((px - padL) / innerW * (n - 1));
+            idx = Math.max(0, Math.min(n - 1, idx));
+            const gx = xAt(idx);
+            const hl = document.getElementById('hover-line');
+            hl.setAttribute('x1', gx);
+            hl.setAttribute('x2', gx);
+            hl.setAttribute('visibility', 'visible');
+
+            let html = '<div style="font-weight:700;margin-bottom:4px;">' + days[idx] + '</div>';
+            for (const k of metrics) {
+                const m = TREND_METRICS[k];
+                const v = data.series[k][idx];
+                const shown = k === 'revenue'
+                    ? '¥' + Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                    : Number(v).toLocaleString();
+                html += '<div><span class="dot" style="background:' + m.color + ';margin-right:6px;"></span>' + m.label + '：' + shown + '</div>';
+            }
+            tooltip.innerHTML = html;
+            tooltip.style.display = 'block';
+
+            const wrapRect = tooltip.parentElement.getBoundingClientRect();
+            let tx = e.clientX - wrapRect.left + 14;
+            if (tx + 200 > wrapRect.width) tx = tx - 214;
+            tooltip.style.left = tx + 'px';
+            tooltip.style.top = (e.clientY - wrapRect.top - 10) + 'px';
+        };
+        svg.onmouseleave = function() {
+            tooltip.style.display = 'none';
+            const hl = document.getElementById('hover-line');
+            if (hl) hl.setAttribute('visibility', 'hidden');
+        };
+    }
+
+    initTrendDates();
     </script>
 </body>
 </html>"""
